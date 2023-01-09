@@ -61,7 +61,7 @@ impl<L: Lenia> Simulator<L> {
     pub fn new(simulation_type: L) -> Self where L: Lenia {
         Simulator{
             sim: simulation_type,
-            kernel: Kernel::new(utils::kernels::gaussian_donut_2d(100), &[100, 100]),
+            kernel: Kernel::from(utils::kernels::gaussian_donut_2d(100), &[200, 200]),
         }
     }
 
@@ -124,28 +124,30 @@ struct ConvolutionChannel {
 }
 
 
-pub struct Kernel {
-    pub base: ndarray::ArrayD<f64>,
+struct Kernel {
+    base: ndarray::ArrayD<f64>,
     normalized: ndarray::ArrayD<f64>,
-    pub shifted: ndarray::ArrayD<f64>,
     transformed: ndarray::ArrayD<Complex<f64>>,
 }
 
 impl Kernel {
     // Creates a new Kernel struct from an n-dimensional ndarray array.
-    // Creates optimized representations for convoluton during simulation.
-    pub fn new(kernel: ndarray::ArrayD<f64>, channel_shape: &[usize]) -> Self {
+    // Creates optimized representations for convolution
+    pub fn from(kernel: ndarray::ArrayD<f64>, channel_shape: &[usize]) -> Self {
         let mut normalized_kernel = kernel.clone();
         let mut shifted_and_fft = ndarray::ArrayD::from_elem(channel_shape, Complex::new(0.0, 0.0));
         
         // Check for coherence in dimensionality and that the kernel is not
-        // larger than the channel it is used to convolute with.
+        // larger than the channel it is used to convolve with.
         if normalized_kernel.shape().len() != shifted_and_fft.shape().len() { 
-            panic!{"Supplied kernel dimensionality does not match the supplied channel dimensionality!"}; 
+            panic!{"Supplied kernel dimensionality does not match the supplied channel dimensionality!
+                \nkernel: {} dimensional vs. channel: {} dimensional",
+                normalized_kernel.shape().len(), shifted_and_fft.shape().len()
+            }; 
         }
         for (i, dim) in normalized_kernel.shape().iter().enumerate() {
             if *dim > shifted_and_fft.shape()[i] { 
-                panic!{"Supplied kernel is larger than the channel it acts on!"} 
+                panic!{"Supplied kernel is larger than the channel it acts on in axis {}!", i} 
             }
         }
 
@@ -155,10 +157,19 @@ impl Kernel {
             *elem *= scaler;
         }
 
-        // Create a shifted kernel
-        //let mut shifted_buffer = ndarray::ArrayD::from_elem(channel_shape, 0.0);
-        let mut shifted = normalized_kernel.clone();
-        for (i, axis) in normalized_kernel.shape().iter().enumerate() {
+        // Expand the kernel to match the size of the channel shape
+        let mut shifted = ndarray::ArrayD::from_elem(channel_shape, 0.0);
+
+        normalized_kernel.assign_to(shifted.slice_each_axis_mut(
+            |a| Slice::new(
+                (a.len/2 - normalized_kernel.shape()[a.axis.index()]/2) as isize,
+                Some((a.len/2 + normalized_kernel.shape()[a.axis.index()]/2) as isize),
+                1
+            )
+        ));
+        
+        // Shift the kernel into the corner
+        for (i, axis) in channel_shape.iter().enumerate() {
             let mut shifted_buffer = shifted.clone();
             shifted.slice_axis(
                     Axis(i), 
@@ -198,18 +209,17 @@ impl Kernel {
         }
 
         // Create the discrete-fourier-transformed representation of the kernel for fft-convolving. 
-        let mut scratch_space = shifted_and_fft.clone();
-
+        let mut scratch_space = shifted.mapv(|elem| {Complex::new(elem, 0.0)});
         let mut axes: Vec<usize> = Vec::new();
         for (i, _) in shifted_and_fft.shape().iter().enumerate() {
             axes.push(i);
         }
         fft::fftnd(&mut scratch_space, &mut shifted_and_fft, &axes);
 
+        // Create the kernel
         Kernel{
             base: kernel,
             normalized: normalized_kernel,
-            shifted: shifted,
             transformed: shifted_and_fft,
         }
     }

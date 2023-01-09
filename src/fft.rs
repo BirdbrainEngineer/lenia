@@ -85,7 +85,7 @@ fn mutate_lane<T: Zero + Clone, D: Dimension>(input: &mut Array<T, D>, output: &
         output.swap_axes(0, axis);
         {
             let mut outrows = output.rows_mut().into_iter();
-            for mut row in input.rows_mut() {
+            for row in input.rows_mut() {
                 let mut outrow = outrows.next().unwrap();
                 let mut vec = row.to_vec();
                 let mut out = vec![Zero::zero(); outrow.len()];
