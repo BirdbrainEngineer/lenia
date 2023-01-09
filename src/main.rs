@@ -32,21 +32,10 @@ fn main() {
         let width = image.width() as usize;
         for (y, row) in image.chunks_mut(width).enumerate() {
             for (x, pixel) in row.iter_mut().enumerate() {
-                /*pixel.r = (lenia_simulator.kernel.base[[x / SCALE / 2, y / SCALE / 2]] * 255.0) as u8;
+                pixel.r = ((lenia::utils::growth_functions::standard_lenia(x as f64 / (SIDE_LEN * SCALE) as f64) + 1.0) * 120.0) as u8;
                 pixel.g = pixel.r;
                 pixel.b = pixel.r;
-                */
-                 
-                pixel.r = (lenia_simulator.kernel.transformed[[x / SCALE, y / SCALE]].im * 10000000.0) as u8;
-                pixel.b = (-lenia_simulator.kernel.transformed[[x / SCALE, y / SCALE]].im * 10000000.0) as u8;
-                pixel.g = 0;
                 
-                /*pixel.g = 
-                    (lenia_simulator.kernel.transformed[[x / SCALE, y / SCALE]].re * 500000.0) as u8 
-                    +
-                    (lenia_simulator.kernel.transformed[[x / SCALE, y / SCALE]].im * 500000.0) as u8;
-                    pixel.b = (lenia_simulator.kernel.transformed[[x / SCALE, y / SCALE]].im * 500000.0) as u8;
-                */
             }
         }
     });

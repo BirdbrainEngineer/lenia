@@ -2,15 +2,17 @@ use ndarray::{self, IxDyn, Axis, s, Slice};
 use num_complex::Complex;
 use crate::fft;
 
-//Some utility functions and options for implementing default Lenia
+// Some utility functions and options for implementing default Lenia
 pub mod utils {
-    //Collection of some common kernel generators
+    // Collection of some common kernel generators
     pub mod kernels {
         use probability::distribution::{Gaussian, Continuous};
         use ndarray::IxDyn;
 
-        //functions
-        //Creates the kernel base for a gaussian donut in 2d. The peak is placed at radius/2 distance from center. This is one of the default kernels for 2d Lenia.
+        /// functions
+        // Creates the kernel base for a gaussian donut in 2d. 
+        // The peak is placed at radius/2 distance from center. 
+        // This is one of the default kernels for 2d Lenia.
         pub fn gaussian_donut_2d(diameter: usize) -> ndarray::ArrayD<f64> {
             let radius = diameter as f64 / 2.0;
             let distribution = Gaussian::new(diameter as f64 / 4.0, diameter as f64 / 12.0);
@@ -37,11 +39,10 @@ pub mod utils {
 
     pub mod growth_functions {
         pub fn standard_lenia(num: f64) -> f64 {
-            1.0 // pass implementation
-        }
-
-        pub fn standard_lenia_precomputed(num: f64) -> f64 {
-            1.0 //pass implementation
+            let x = num;
+            let b = 0.3;
+            let c = 0.03;
+            (2.0 * (-(((x - b) * (x - b))/(2.0 * 0.0009))).exp()) - 1.0
         }
 
         pub fn game_of_life(num: f64) -> f64 {
@@ -49,12 +50,16 @@ pub mod utils {
             else if num < 0.333333333 { return 0.0 }
             else { return 1.0 }
         }
+
+        pub fn constant(num: f64) -> f64 {
+            1.0
+        }
     }
 }
 
 pub struct Simulator<L: Lenia> {
     sim: L,
-    pub kernel: Kernel,
+    kernel: Kernel,
 }
 
 impl<L: Lenia> Simulator<L> {
@@ -120,7 +125,7 @@ struct Channel {
 struct ConvolutionChannel {
     field: ndarray::ArrayD<Complex<f64>>,
     kernel: Kernel,
-    growth: fn(f64) -> f64,
+    growth: fn(f64, &[f64]) -> f64,
 }
 
 
