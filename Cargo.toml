@@ -13,3 +13,6 @@ pixel-canvas = "0.2.3"
 glium = "*"
 probability = "0.20.3"
 rand = "0.8.5"
+
+[profile.release]
+debug = 1

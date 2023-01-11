@@ -6,7 +6,6 @@ use crate::fft;
 pub mod utils {
     // Collection of some common kernel generators
     pub mod kernels {
-        use probability::distribution::{Gaussian, Continuous};
         use ndarray::IxDyn;
 
         /// functions
@@ -35,6 +34,35 @@ pub mod utils {
             out
         }
 
+        pub fn multi_gaussian_donut_2d(diameter: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
+            if means.len() != peaks.len() || means.len() != stddevs.len() {
+                panic!("Function \"multi_gaussian_donut_2d\" expects each mean parameter to be accompanied by a peak and stddev parameter!");
+            }
+            let radius = diameter as f64 / 2.0;
+            let inverse_radius = 1.0 / radius;
+            let mut out = ndarray::ArrayD::zeros(IxDyn(&[diameter, diameter]));
+            let x0 = radius;
+            let y0 = radius;
+            for i in 0..out.shape()[0] {
+                for j in 0..out.shape()[1] {
+                    let x1 = i as f64;
+                    let y1 = j as f64;
+                    let dist = ((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0)).sqrt();
+                    if dist <= radius { 
+                        let mut sum = 0.0;
+                        for i in 0..means.len() {
+                            sum += super::sample_normal(dist * inverse_radius, means[i], stddevs[i]) * peaks[i];
+                        }
+                        out[[i, j]] = sum;
+                    }
+                    else { 
+                        out[[i, j]] = 0.0
+                    }
+                }
+            }
+            out
+        }
+
         pub fn game_of_life() -> ndarray::ArrayD<f64> {
             let mut out = ndarray::ArrayD::from_elem(vec![3 as usize, 3], 1.0);
             out[[1, 1]] = 0.0;
@@ -43,19 +71,22 @@ pub mod utils {
     }
 
     pub mod growth_functions {
-        pub fn standard_lenia(num: f64) -> f64 {
-            (2.0 * super::sample_normal(num, 0.15, 0.017)) - 1.0
+        // Standard unimodal, gaussian lenia growth function.
+        // param[0]: mu (the mean / the highest point of the growth function)
+        // param[1]: stddev (standard deviation)
+        pub fn standard_lenia(num: f64, params: &[f64]) -> f64 {
+            (2.0 * super::sample_normal(num, params[0], params[1])) - 1.0
         }
 
-        pub fn game_of_life(num: f64) -> f64 {
+        pub fn game_of_life(num: f64, params: &[f64]) -> f64 {
             let index = (num * 9.0).round() as usize;
             if index == 2 { 0.0 }
             else if index == 3 { 1.0 }
             else {-1.0 }
         }
 
-        pub fn constant(num: f64) -> f64 {
-            1.0
+        pub fn constant(num: f64, params: &[f64]) -> f64 {
+            params[0]
         }
     }
 
@@ -186,8 +217,8 @@ impl<L: Lenia> Simulator<L> {
         self.sim.set_kernel(kernel, convolution_channel);
     }
 
-    pub fn set_growth_function(&mut self, f: fn(f64) -> f64, convolution_channel: usize) {
-        self.sim.set_growth(f, convolution_channel);
+    pub fn set_growth_function(&mut self, f: fn(f64, &[f64]) -> f64, growth_parameters: Vec<f64>, convolution_channel: usize) {
+        self.sim.set_growth(f, growth_parameters, convolution_channel);
     }
 
     pub fn set_dt(&mut self, dt: f64) {
@@ -235,7 +266,7 @@ pub trait Lenia {
     fn initialize_channels(&mut self, shape: &[usize], num_channels: usize) {}
     fn add_conv_channels(&mut self, num_conv_channels: usize) {}
     fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize) {}
-    fn set_growth(&mut self, f: fn(f64) -> f64, conv_channel: usize) {}
+    fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize) {}
     fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize) {}
     fn set_dt(&mut self, new_dt: f64) {}
     fn set_channel(&mut self, data: &ndarray::ArrayD<f64>, channel: usize) {}
@@ -267,7 +298,7 @@ impl StandardLenia {
                 proper_dims.push(*dim);
             }
         }
-        let kernel = Kernel::from(utils::kernels::gaussian_donut_2d(61, 1.0/3.35), &proper_dims);
+        let kernel = Kernel::from(utils::kernels::gaussian_donut_2d(26, 1.0/3.35), &proper_dims);
         let conv_field = ndarray::ArrayD::from_elem(proper_dims, Complex::new(0.0, 0.0));
         let conv_channel = ConvolutionChannel {
             input_channel: 0,
@@ -275,6 +306,7 @@ impl StandardLenia {
             kernel: kernel,
             field: conv_field,
             growth: utils::growth_functions::standard_lenia,
+            growth_params: vec![0.15, 0.017],
         };
 
         let channel = Channel {
@@ -312,7 +344,7 @@ impl Lenia for StandardLenia {
         fft::ifftnd(&mut self.buffer[0], &mut self.conv_channel[0].field, &[1, 0]);
         self.channel[0].field.zip_mut_with(&self.conv_channel[0].field, 
             |a, b| {
-                a.re = (a.re + ((self.conv_channel[0].growth)(b.re) * self.dt)).clamp(0.0, 1.0);
+                a.re = (a.re + ((self.conv_channel[0].growth)(b.re, &self.conv_channel[0].growth_params) * self.dt)).clamp(0.0, 1.0);
                 a.im = 0.0;
             }
         );
@@ -322,8 +354,9 @@ impl Lenia for StandardLenia {
         self.conv_channel[0].kernel = Kernel::from(kernel, self.channel[0].field.shape());
     }
 
-    fn set_growth(&mut self, f: fn(f64) -> f64, conv_channel: usize) {
+    fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize) {
         self.conv_channel[0].growth = f;
+        self.conv_channel[0].growth_params = growth_params;
     }
 
     fn set_dt(&mut self, new_dt: f64) {
@@ -359,7 +392,8 @@ struct ConvolutionChannel {
     pub input_buffer: ndarray::ArrayD<Complex<f64>>,
     pub field: ndarray::ArrayD<Complex<f64>>,
     pub kernel: Kernel,
-    pub growth: fn(f64) -> f64,
+    pub growth: fn(f64, &[f64]) -> f64,
+    pub growth_params: Vec<f64>,
 }
 
 

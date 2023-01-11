@@ -1,8 +1,9 @@
 mod lenia;
 mod fft;
 mod keyboardhandler;
+use glium::glutin::platform::unix::x11::ffi::XA_SUBSCRIPT_X;
 use ndarray::{self, IxDyn};
-use num_complex::Complex;
+use lenia::utils::{growth_functions, kernels};
 use pixel_canvas::{Canvas, Color, input};
 
 const SIDE_LEN: usize = 150;
@@ -12,22 +13,27 @@ const SCALE: usize = 4;
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let inv_scale = 1.0 / SCALE as f64;
+    let mut simulating = false;
 
     let mut lenia_simulator = lenia::Simulator::new(lenia::StandardLenia::new(&[SIDE_LEN, SIDE_LEN]));
     lenia_simulator.fill_channel(
         &lenia::utils::initializations::random_hypercubic(&[SIDE_LEN, SIDE_LEN], 33, 0.4, false), 
         0
     );
-    //lenia_simulator.set_dt(0.05);
-    /*let mut lenia_simulator = lenia::Simulator::new(lenia::StandardLenia::new(&[SIDE_LEN, SIDE_LEN]));
-    lenia_simulator.set_growth_function(lenia::utils::growth_functions::game_of_life, 0);
-    lenia_simulator.set_kernel(lenia::utils::kernels::game_of_life(), 0);
-    lenia_simulator.set_dt(1.0);
-    lenia_simulator.fill_channel(
-        &lenia::utils::initializations::random_cube(&[SIDE_LEN, SIDE_LEN], 8, true), 
-        0,
-    );*/
+    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.25, 0.03], 0);
+    //lenia_simulator.set_kernel(kernels::gaussian_donut_2d(48, 1.0/3.35), 0);
+    let kernel_diameter = 80;
+    let kernel_for_render = kernels::multi_gaussian_donut_2d(
+        kernel_diameter, 
+        &vec![0.25, 0.75], 
+        &vec![0.95, 0.45], 
+        &vec![0.07, 0.07]
+    );
+    let kernel_render_scaler = kernel_diameter as f64 / SIDE_LEN as f64;
+    
+    lenia_simulator.set_kernel(kernel_for_render.clone(), 0);
 
+    
     let canvas = Canvas::new(SIDE_LEN * SCALE, SIDE_LEN * SCALE)
         .title("Lenia")
         .state(keyboardhandler::KeyboardState::new())
@@ -37,15 +43,12 @@ fn main() {
 
         match keyboardstate.character {
             'r' => {
-                /*lenia_simulator.fill_channel(
-                    &lenia::utils::initializations::random_gaussian_2d(&[SIDE_LEN, SIDE_LEN], 30.0, true), 
-                    0
-                );*/
                 lenia_simulator.fill_channel(
-                    &lenia::utils::initializations::random_hypercubic_patches(&[SIDE_LEN, SIDE_LEN], SIDE_LEN / 6, 15, 0.4, false), 
+                    &lenia::utils::initializations::random_hypercubic_patches(&[SIDE_LEN, SIDE_LEN], SIDE_LEN / 4, 6, 0.45, false), 
                     0
                 );
             }
+            's' => { simulating = true; }
             _ => {}
         }
         keyboardstate.character = '\0';
@@ -53,13 +56,26 @@ fn main() {
         let frame = lenia_simulator.get_frame(0, &[0, 1], &[0, 0]);
 
         let width = image.width() as usize;
-        for (y, row) in image.chunks_mut(width).enumerate() {
-            for (x, pixel) in row.iter_mut().enumerate() {
-                pixel.r = (frame[[(x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize]] * 255.0) as u8;
-                pixel.g = pixel.r;
-                pixel.b = pixel.r;
+        if !simulating {
+            for (y, row) in image.chunks_mut(width).enumerate() {
+                for (x, pixel) in row.iter_mut().enumerate() {
+                    let x_index = ((x as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
+                    let y_index = ((y as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
+                    pixel.r = (kernel_for_render[[x_index, y_index]] * 255.0) as u8;
+                    pixel.g = pixel.r;
+                    pixel.b = pixel.r;
+                }
             }
         }
-        lenia_simulator.iterate();
+        else {
+            for (y, row) in image.chunks_mut(width).enumerate() {
+                for (x, pixel) in row.iter_mut().enumerate() {
+                    pixel.r = (frame[[(x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize]] * 255.0) as u8;
+                    pixel.g = pixel.r;
+                    pixel.b = pixel.r;
+                }
+            }
+            lenia_simulator.iterate();
+        }
     });
 }
