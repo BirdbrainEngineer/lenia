@@ -1,13 +1,13 @@
 mod lenia;
 mod fft;
 mod keyboardhandler;
-use glium::glutin::platform::unix::x11::ffi::XA_SUBSCRIPT_X;
 use ndarray::{self, IxDyn};
 use lenia::utils::{growth_functions, kernels};
 use pixel_canvas::{Canvas, Color, input};
 
 const SIDE_LEN: usize = 150;
 const SCALE: usize = 4;
+const STEPS: usize = 100;
 
 
 fn main() {
@@ -29,9 +29,13 @@ fn main() {
         &vec![0.95, 0.45], 
         &vec![0.07, 0.07]
     );
-    let kernel_render_scaler = kernel_diameter as f64 / SIDE_LEN as f64;
     
-    lenia_simulator.set_kernel(kernel_for_render.clone(), 0);
+    let kernel_into_sim = kernel_for_render.clone();
+    lenia_simulator.set_kernel(kernel_into_sim, 0);
+
+    /*for i in 0..STEPS {
+        lenia_simulator.iterate();
+    }*/
 
     
     let canvas = Canvas::new(SIDE_LEN * SCALE, SIDE_LEN * SCALE)
@@ -78,4 +82,5 @@ fn main() {
             lenia_simulator.iterate();
         }
     });
+
 }

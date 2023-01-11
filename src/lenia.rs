@@ -1,6 +1,9 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 use ndarray::{self, IxDyn, Axis, s, Slice, Order};
 use num_complex::Complex;
-use crate::fft;
+use crate::fft::{self, PreplannedFFTND};
 
 // Some utility functions and options for implementing default Lenia
 pub mod utils {
@@ -207,7 +210,7 @@ pub struct Simulator<L: Lenia> {
 }
 
 impl<L: Lenia> Simulator<L> {
-    pub fn new(simulation_type: L) -> Self where L: Lenia {
+    pub fn new(simulation_type: L) -> Self {
         Simulator{
             sim: simulation_type,
         }
@@ -280,7 +283,8 @@ pub struct StandardLenia {
     channel: Vec<Channel>,
     buffer: Vec<ndarray::ArrayD<Complex<f64>>>,
     conv_channel: Vec<ConvolutionChannel>,
-
+    forward_fft_instances: Vec<fft::PreplannedFFTND>,
+    inverse_fft_instances: Vec<fft::PreplannedFFTND>,
 }
 
 impl StandardLenia {
@@ -315,6 +319,8 @@ impl StandardLenia {
         };
         
         StandardLenia{
+            forward_fft_instances: vec![fft::PreplannedFFTND::preplan(&channel.field, false)],
+            inverse_fft_instances: vec![fft::PreplannedFFTND::preplan(&channel.field, true)],
             dt: 0.1,
             channel: vec![channel],
             buffer: vec![conv_channel.field.clone()],
@@ -331,7 +337,12 @@ impl Lenia for StandardLenia {
                 a.im = 0.0;
             }
         );
-        fft::fftnd(&mut self.conv_channel[0].input_buffer, &mut self.buffer[0], &[0, 1]);
+        self.forward_fft_instances[0].transform(
+            &mut self.conv_channel[0].input_buffer, 
+            &mut self.buffer[0], 
+            &[0, 1]
+        );
+        //fft::fftnd(&mut self.conv_channel[0].input_buffer, &mut self.buffer[0], &[0, 1]);
         self.buffer[0].zip_mut_with(&self.conv_channel[0].kernel.transformed, 
             |a, b| {    // Complex multiplication without cloning
                 let ac = a.re * b.re;
@@ -341,6 +352,11 @@ impl Lenia for StandardLenia {
                 a.re = real;
             }
         );
+        /*self.inverse_fft_instances[0].transform(
+            &mut self.buffer[0], 
+            &mut self.conv_channel[0].field, 
+            &[0, 1]
+        );*/
         fft::ifftnd(&mut self.buffer[0], &mut self.conv_channel[0].field, &[1, 0]);
         self.channel[0].field.zip_mut_with(&self.conv_channel[0].field, 
             |a, b| {
