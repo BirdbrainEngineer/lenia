@@ -352,12 +352,12 @@ impl Lenia for StandardLenia {
                 a.re = real;
             }
         );
-        /*self.inverse_fft_instances[0].transform(
+        self.inverse_fft_instances[0].transform(
             &mut self.buffer[0], 
             &mut self.conv_channel[0].field, 
-            &[0, 1]
-        );*/
-        fft::ifftnd(&mut self.buffer[0], &mut self.conv_channel[0].field, &[1, 0]);
+            &[1, 0]
+        );
+        //fft::ifftnd(&mut self.buffer[0], &mut self.conv_channel[0].field, &[0, 1]);
         self.channel[0].field.zip_mut_with(&self.conv_channel[0].field, 
             |a, b| {
                 a.re = (a.re + ((self.conv_channel[0].growth)(b.re, &self.conv_channel[0].growth_params) * self.dt)).clamp(0.0, 1.0);

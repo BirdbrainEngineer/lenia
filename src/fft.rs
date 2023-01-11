@@ -42,6 +42,13 @@ impl PreplannedFFT{
 
     pub fn transform(&mut self,input: &mut [Complex<f64>], output: &mut [Complex<f64>]) {
         self.fft.process_outofplace_with_scratch(input, output, &mut self.scratch_space);
+        if self.inverse {
+            let inverse_len = 1.0 / input.len() as f64;
+            for v in output.iter_mut() {
+                v.re *= inverse_len;
+                v.im *= inverse_len;
+            }
+        }
     }
 
     pub fn inverse(&self) -> bool {
@@ -121,7 +128,7 @@ fn planned_mutate_lane<T: Zero + Clone, D: Dimension>(fft: &mut PreplannedFFT, i
                 let mut out = vec![Zero::zero(); outrow.len()];
                 f(fft, &mut vec, &mut out);
                 for i in 0..outrow.len() {
-                    outrow[i] = out.remove(0);
+                    outrow[i] = out[i].clone();
                 }
             }
         }
@@ -217,7 +224,7 @@ fn mutate_lane<T: Zero + Clone, D: Dimension>(input: &mut Array<T, D>, output: &
                 let mut out = vec![Zero::zero(); outrow.len()];
                 f(&mut vec, &mut out);
                 for i in 0..outrow.len() {
-                    outrow[i] = out.remove(0);
+                    outrow[i] = out[i].clone();
                 }
             }
         }

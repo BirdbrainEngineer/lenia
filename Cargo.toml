@@ -14,5 +14,5 @@ glium = "*"
 probability = "0.20.3"
 rand = "0.8.5"
 
-[profile.release]
-debug = 1
+#[profile.release]
+#debug = 2
