@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use ndarray::{self, IxDyn, Axis, s, Slice, Order};
+use ndarray::{self, Axis, Slice, Order};
 use num_complex::Complex;
 use crate::fft::{self, PreplannedFFTND};
 
@@ -11,11 +11,10 @@ pub mod utils {
     pub mod kernels {
         use ndarray::IxDyn;
 
-        /// functions
-        // Creates the kernel base for a gaussian donut in 2d. 
-        // The peak is placed at radius/2 distance from center.
-        // stddev of ~1.0/3.35 gives a good kernel for standard Lenia.
-        // This is one of the default kernels for 2d Lenia.
+        /// Creates the kernel base for a gaussian donut in 2d. 
+        /// The peak is placed at radius/2 distance from center.
+        /// stddev of ~1.0/3.35 gives a good kernel for standard Lenia.
+        /// This is one of the default kernels for 2d Lenia.
         pub fn gaussian_donut_2d(diameter: usize, stddev: f64) -> ndarray::ArrayD<f64> {
             let radius = diameter as f64 / 2.0;
             let mut out = ndarray::ArrayD::zeros(IxDyn(&[diameter, diameter]));
@@ -36,7 +35,10 @@ pub mod utils {
             }
             out
         }
-
+        /// Create the base for a kernel with multiple concentric gaussian donuts. 
+        /// diameter: The diameter of the whole kernel; The kernel is guaranteed to be scuare in shape.
+        /// means: The placement of the peak values of individual rings. Must be in range [0.0..1.0], where 0.0 is the center point of the kernel.
+        /// peaks: The maximum value that each individual ring can create. Can be any 
         pub fn multi_gaussian_donut_2d(diameter: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
             if means.len() != peaks.len() || means.len() != stddevs.len() {
                 panic!("Function \"multi_gaussian_donut_2d\" expects each mean parameter to be accompanied by a peak and stddev parameter!");
@@ -93,7 +95,7 @@ pub mod utils {
         }
     }
 
-    pub mod initializations {
+    pub mod seeders {
         use rand::Rng;
 
         fn generate_random_hypercube(shape: &[usize], scaler: f64, discrete: bool) -> ndarray::ArrayD<f64> {
@@ -207,12 +209,14 @@ pub mod utils {
 
 pub struct Simulator<L: Lenia> {
     sim: L,
+    channel_shape: Vec<usize>,
 }
 
 impl<L: Lenia> Simulator<L> {
-    pub fn new(simulation_type: L) -> Self {
+    pub fn new(channel_shape: Vec<usize>) -> Self {
         Simulator{
-            sim: simulation_type,
+            sim: L::new(&channel_shape),
+            channel_shape: channel_shape,
         }
     }
 
@@ -263,18 +267,28 @@ impl<L: Lenia> Simulator<L> {
         ).unwrap()
         .mapv(|el| { el.re });
     }
+
+    pub fn get_dt(&self) -> f64 {
+        self.sim.get_dt()
+    }
+
+    pub fn get_channel_shape(&self) -> &[usize] {
+        &self.channel_shape
+    }
 }
 
 pub trait Lenia {
-    fn initialize_channels(&mut self, shape: &[usize], num_channels: usize) {}
-    fn add_conv_channels(&mut self, num_conv_channels: usize) {}
-    fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize) {}
-    fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize) {}
-    fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize) {}
-    fn set_dt(&mut self, new_dt: f64) {}
-    fn set_channel(&mut self, data: &ndarray::ArrayD<f64>, channel: usize) {}
+    fn new(shape: &[usize]) -> Self;
+    fn initialize_channels(&mut self, num_channels: usize);
+    fn add_conv_channels(&mut self, num_conv_channels: usize);
+    fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize);
+    fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize);
+    fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize);
+    fn set_dt(&mut self, new_dt: f64);
+    fn set_channel(&mut self, data: &ndarray::ArrayD<f64>, channel: usize);
     fn get_data(&self, channel: usize) -> ndarray::ArrayD<f64>;
     fn get_data_asref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>>;
+    fn get_dt(&self) -> f64;
     fn iterate(&mut self);
 }
 
@@ -287,13 +301,13 @@ pub struct StandardLenia {
     inverse_fft_instances: Vec<fft::PreplannedFFTND>,
 }
 
-impl StandardLenia {
-    pub fn new(dimensions: &[usize]) -> Self {
-        if dimensions.len() < 2 || dimensions.len() > 2 { 
-            panic!("Expected 2 dimensions for Standard Lenia! Found {}", dimensions.len()); 
+impl Lenia for StandardLenia {
+    fn new(shape: &[usize]) -> Self {
+        if shape.len() < 2 || shape.len() > 2 { 
+            panic!("Expected 2 dimensions for Standard Lenia! Found {}", shape.len()); 
         }
         let mut proper_dims: Vec<usize> = Vec::new();
-        for (i, dim) in dimensions.iter().enumerate() {
+        for (i, dim) in shape.iter().enumerate() {
             if *dim < 25 {
                 println!("Dimension {} is extremely small ({} pixels). Resized dimension to 25 pixels.", i, *dim);
                 proper_dims.push(25);
@@ -327,9 +341,7 @@ impl StandardLenia {
             conv_channel: vec![conv_channel],
         }
     }
-}
 
-impl Lenia for StandardLenia {
     fn iterate(&mut self) {
         self.conv_channel[0].input_buffer.zip_mut_with(&self.channel[0].field, 
             |a, b| {
@@ -342,7 +354,6 @@ impl Lenia for StandardLenia {
             &mut self.buffer[0], 
             &[0, 1]
         );
-        //fft::fftnd(&mut self.conv_channel[0].input_buffer, &mut self.buffer[0], &[0, 1]);
         self.buffer[0].zip_mut_with(&self.conv_channel[0].kernel.transformed, 
             |a, b| {    // Complex multiplication without cloning
                 let ac = a.re * b.re;
@@ -357,13 +368,24 @@ impl Lenia for StandardLenia {
             &mut self.conv_channel[0].field, 
             &[1, 0]
         );
-        //fft::ifftnd(&mut self.buffer[0], &mut self.conv_channel[0].field, &[0, 1]);
         self.channel[0].field.zip_mut_with(&self.conv_channel[0].field, 
             |a, b| {
                 a.re = (a.re + ((self.conv_channel[0].growth)(b.re, &self.conv_channel[0].growth_params) * self.dt)).clamp(0.0, 1.0);
                 a.im = 0.0;
             }
         );
+    }
+
+    fn initialize_channels(&mut self, num_channels: usize) {
+        println!("Initializing channels not available for Standard Lenia! Try using Extended Lenia instead.");
+    }
+
+    fn add_conv_channels(&mut self, num_conv_channels: usize) {
+        println!("Adding convolution channels not available for Standard Lenia! Try using Extended Lenia instead.");
+    }
+
+    fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize) {
+        println!("Convolution output weights are not available for Standard Lenia! Try usingh Extended Lenia instead.");
     }
 
     fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize) {
@@ -394,6 +416,10 @@ impl Lenia for StandardLenia {
                 a.im = 0.0;
             }
         );
+    }
+
+    fn get_dt(&self) -> f64 {
+        self.dt
     }
 }
 
