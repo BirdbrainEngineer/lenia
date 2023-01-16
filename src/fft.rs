@@ -1,16 +1,25 @@
-// Original code from Rust crate: ofuton = "0.1.0"
-// Copyright (c) 2018 Takafumi Hirata
-// Distributed under the MIT license (https://opensource.org/licenses/MIT)
-// Code brought up to date to work with ndarray = "0.15.6" and rustfft = "6.1.0" by Birdbrain
-// Preplanning functionality in the form of PreplannedFFT and PreplannedFFTND structs added by Birdbrain. 
-
 #![allow(dead_code)]
+#![allow(unused_variables)]
+
+/// Original code from Rust crate: ofuton = "0.1.0"
+/// 
+/// Copyright (c) 2018 Takafumi Hirata
+/// 
+/// Distributed under the MIT license (https://opensource.org/licenses/MIT)
+/// 
+/// Code brought up to date to work with ndarray = "0.15.6" and rustfft = "6.1.0" by Birdbrain
+/// 
+/// Preplanning functionality in the form of PreplannedFFT and PreplannedFFTND 
+/// structs added by Birdbrain. 
+
 use std::sync::Arc;
 use rustfft::{Fft, FftNum, FftPlanner, FftDirection};
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::{Zero};
 use ndarray::{Dimension, Array, Array2};
 
+/// `PreplannedFFT` struct is a container for all the relevant data for a determined length
+/// 1D Fast-Fourier-Transform. 
 pub struct PreplannedFFT{
     fft: Arc<dyn Fft<f64>>,
     scratch_space: Vec<Complex<f64>>,
@@ -19,7 +28,18 @@ pub struct PreplannedFFT{
 }
 
 impl PreplannedFFT{
-    pub fn preplan(prototype: &[Complex<f64>], inverse: bool) -> Self {
+    /// Preplan fast-fourier-transform for arrays with the length of the prototype array.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `prototype` - Array the length of which determines the length of data that the
+    /// fft will be able to work on
+    /// 
+    /// * `inverse` - If `true` then the fft will compute inverse fourier transforms instead.
+    /// 
+    /// ### Returns
+    /// Instance capable of computing fourier transforms on certain length data.
+    pub fn preplan_by_prototype(prototype: &[Complex<f64>], inverse: bool) -> Self {
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft(
             prototype.len(), 
@@ -40,7 +60,46 @@ impl PreplannedFFT{
         }
     }
 
-    pub fn transform(&mut self,input: &mut [Complex<f64>], output: &mut [Complex<f64>]) {
+    /// Preplan fast-fourier-transform for arrays of a certain length.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `length` - The array length that the fft will be able to transform.
+    /// 
+    /// * `inverse` - If `true` then the fft will compute inverse fourier transforms instead.
+    /// 
+    /// ### Returns
+    /// Instance capable of computing fourier transforms on certain length data.
+    pub fn preplan_by_length(length: usize, inverse: bool) -> Self {
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft(
+            length, 
+            if inverse == true {
+                FftDirection::Inverse
+            } 
+            else {
+                FftDirection::Forward
+            }
+        );
+        let scratch_space_length = fft.get_outofplace_scratch_len();
+
+        PreplannedFFT { 
+            fft: fft, 
+            scratch_space: vec![Zero::zero(); scratch_space_length], 
+            inverse: inverse, 
+            length: length,
+        }
+    }
+
+    /// Computes the forward- or inverse fourier transform using a fast-fourier-transform algorithm.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `input` - Reference to the array to be fourier transformed. **The input array 
+    /// will have junk data in it after the transform!**
+    /// 
+    /// * `output` - Reference to the array that will contain the transformed data.
+    pub fn transform(&mut self, input: &mut [Complex<f64>], output: &mut [Complex<f64>]) {
         self.fft.process_outofplace_with_scratch(input, output, &mut self.scratch_space);
         if self.inverse {
             let inverse_len = 1.0 / input.len() as f64;
@@ -51,15 +110,19 @@ impl PreplannedFFT{
         }
     }
 
+    /// Returns `true` if the fft computes inverse fourier transforms, otherwise outputs `false`.
     pub fn inverse(&self) -> bool {
         self.inverse
     }
 
-    pub fn len(&self) -> usize {
+    /// Returns the array length that the fft can transform.
+    pub fn length(&self) -> usize {
         self.length
     }
 }
 
+/// `PreplannedFFTND` struct is for preplanning fast-fourier-transforms that work on 
+/// n-dimensional arrays.
 pub struct PreplannedFFTND {
     inverse: bool,
     shape: Vec<usize>,
@@ -67,14 +130,25 @@ pub struct PreplannedFFTND {
 }
 
 impl PreplannedFFTND {
-    pub fn preplan(prototype: &ndarray::ArrayD<Complex<f64>>, inverse: bool) -> Self {
+    /// Preplan fast-fourier-transform for arrays with the shape of the prototype array.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `prototype` - Array the shape of which determines the shape of data that the
+    /// fft will be able to work on
+    /// 
+    /// * `inverse` - If `true` then the fft will compute inverse fourier transforms instead.
+    /// 
+    /// ### Returns
+    /// Instance capable of computing fourier transforms on certain shaped data.
+    pub fn preplan_by_prototype(prototype: &ndarray::ArrayD<Complex<f64>>, inverse: bool) -> Self {
         let mut shape = Vec::new();
         let mut ffts = Vec::new();
         
         for dim in prototype.shape() {
             shape.push(*dim);
             let dimension_prototype = vec![Zero::zero(); *dim];
-            ffts.push(PreplannedFFT::preplan(&dimension_prototype, inverse));
+            ffts.push(PreplannedFFT::preplan_by_prototype(&dimension_prototype, inverse));
         }
 
         PreplannedFFTND { 
@@ -84,6 +158,40 @@ impl PreplannedFFTND {
         }
     }
 
+    /// Preplan fast-fourier-transform for arrays of a certain shape.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `shape` - The shape of the array that the fft will be able to transform.
+    /// 
+    /// * `inverse` - If `true` then the fft will compute inverse fourier transforms instead.
+    /// 
+    /// ### Returns
+    /// Instance capable of computing fourier transforms on certain shaped data.
+    pub fn preplan_by_shape(shape: &[usize], inverse: bool) -> Self {
+        let mut fft_shape: Vec<usize> = Vec::new();
+        let mut ffts = Vec::new();
+        
+        for dim in shape {
+            fft_shape.push(*dim);
+            ffts.push(PreplannedFFT::preplan_by_length(*dim, inverse));
+        }
+
+        PreplannedFFTND { 
+            inverse: inverse, 
+            shape: fft_shape,
+            fft_instances: ffts,
+        }
+    }
+
+    /// Computes the forward- or inverse fourier transform using a fast-fourier-transform algorithm.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `input` - Reference to the array to be fourier transformed. **The input array 
+    /// will have junk data in it after the transform!**
+    /// 
+    /// * `output` - Reference to the array that will contain the transformed data.
     pub fn transform<D: Dimension>(&mut self, input: &mut Array<Complex<f64>, D>, output: &mut Array<Complex<f64>, D>, axes: &[usize]) {
         let len = axes.len();
         for i in 0..len {
@@ -99,14 +207,12 @@ impl PreplannedFFTND {
         }
     }
 
-    pub fn transform_single_dim<D: Dimension>(&mut self, input: &mut Array<Complex<f64>, D>, output: &mut Array<Complex<f64>, D>, axis: usize) {
-        planned_mutate_lane(&mut self.fft_instances[axis], input, output, transform_lane, axis);
-    }
-
+    /// Outputs `true` if the fft computes inverse fourier transforms, otherwise outputs `false`.
     pub fn inverse(&self) -> bool {
         self.inverse
     }
 
+    /// Returns the array length that the fft can transform.
     pub fn shape(&self) -> &[usize] {
         &self.shape
     }
