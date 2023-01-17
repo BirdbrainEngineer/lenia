@@ -1,8 +1,7 @@
-mod lenia;
-mod fft;
+mod lenia_ca;
 mod keyboardhandler;
 use ndarray::{ArrayD};
-use lenia::{growth_functions, kernels};
+use lenia_ca::{growth_functions, kernels};
 use pixel_canvas::{Canvas, Color, input};
 
 const SIDE_LEN: usize = 150;
@@ -14,28 +13,35 @@ fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let inv_scale = 1.0 / SCALE as f64;
     let mut simulating = false;
-    let kernel_for_render: ArrayD<f64>;
+    let mut kernel_for_render: ArrayD<f64>;
 
-    let mut lenia_simulator = lenia::Simulator::<lenia::StandardLenia2D>::new(vec![SIDE_LEN, SIDE_LEN]);
+    let mut lenia_simulator = lenia_ca::Simulator::<lenia_ca::lenias::StandardLenia2D>::new(vec![SIDE_LEN, SIDE_LEN]);
     lenia_simulator.fill_channel(
-        &lenia::seeders::random_hypercubic(&[SIDE_LEN, SIDE_LEN], 33, 0.4, false), 
+        &lenia_ca::seeders::random_hypercubic(&[SIDE_LEN, SIDE_LEN], 15, 0.4, false), 
         0
     );
 
     //Orbium unicaudatus
-    //kernel_for_render = kernels::gaussian_donut_2d(48, 1.0/3.35);
+    //kernel_for_render = kernels::gaussian_donut_2d(48, 1.0/6.7);
     //
 
     //Tricircum torquens
     let kernel_diameter = 68;
     lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.25, 0.03], 0);
-    kernel_for_render = kernels::multi_gaussian_donut_2d(
+    /*kernel_for_render = kernels::multi_gaussian_donut_2d(
         kernel_diameter, 
         &vec![0.25, 0.75], 
         &vec![0.97, 0.45], 
         &vec![0.075, 0.08]
+    );*/
+    kernel_for_render = kernels::multi_gaussian_donut_nd(
+        kernel_diameter, 
+        2, 
+        &vec![0.25, 0.75], 
+        &vec![0.97, 0.45], 
+        &vec![0.075, 0.08]
     );
-    
+
     let kernel_into_sim = kernel_for_render.clone();
     lenia_simulator.set_kernel(kernel_into_sim, 0);
 
@@ -54,7 +60,7 @@ fn main() {
         match keyboardstate.character {
             'r' => {
                 lenia_simulator.fill_channel(
-                    &lenia::seeders::random_hypercubic_patches(
+                    &lenia_ca::seeders::random_hypercubic_patches(
                         &[SIDE_LEN, SIDE_LEN], 
                         SIDE_LEN / 4, 
                         6, 
@@ -66,8 +72,8 @@ fn main() {
             }
             's' => { simulating = true; }
             'k' => { simulating = false; }
-            '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 2.0); }
-            '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 0.5); }
+            '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.5); }
+            '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 0.75); }
             _ => {}
         }
         keyboardstate.character = '\0';

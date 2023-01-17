@@ -3,246 +3,11 @@
 
 use ndarray::{self, Axis, Slice, Order};
 use num_complex::Complex;
-use crate::fft::{self};
-
-/// Collection of generators for some of the common Lenia kernels. 
-pub mod kernels {
-    use ndarray::IxDyn;
-
-    /// Creates the kernel base for a gaussian donut in 2d. 
-    /// The mean (position of the highest value) is placed at `0.5`
-    /// in the range `[0.0..1.0]`, where `0.0` is the center of the kernel and `1.0` the outer edge.
-    /// 
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `diameter` - The diameter of the whole kernel. The kernel is guaranteed to be square in shape,
-    /// but any values outside the radius (`diameter / 2`) are set to `0.0`.
-    /// 
-    /// * `stddev` - Standard deviation to use. 
-    /// 
-    /// ### Returns
-    /// A 2d array (`ndarray::ArrayD`) of `f64` values, where each dimension is `diameter` in size.
-    pub fn gaussian_donut_2d(diameter: usize, stddev: f64) -> ndarray::ArrayD<f64> {
-        let radius = diameter as f64 / 2.0;
-        let mut out = ndarray::ArrayD::zeros(IxDyn(&[diameter, diameter]));
-        let x0 = radius;
-        let y0 = radius;
-        for i in 0..out.shape()[0] {
-            for j in 0..out.shape()[1] {
-                let x1 = i as f64;
-                let y1 = j as f64;
-                let dist = ((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0)).sqrt();
-                if dist <= radius { 
-                    out[[i, j]] = super::sample_normal(dist, diameter as f64 * 0.25, diameter as f64 * 0.25 * stddev);
-                }
-                else { 
-                    out[[i, j]] = 0.0
-                }
-            }
-        }
-        out
-    }
-
-    /// Create the base for a kernel made from multiple concentric gaussian "donuts" in 2d.
-    /// Each donut/ring is a single index in the list of parameters. 
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `diameter` - The diameter of the whole kernel. The kernel is guaranteed to be square in shape.
-    /// but any values outside the radius (`diameter / 2`) are set to `0.0`.
-    /// 
-    /// * `means` - The placement of the peak values of individual rings. 
-    /// Should be in range `[0.0..1.0]`, where `0.0` is the center point of the kernel and
-    /// `1.0` is the outer edge of the circular kernel. 
-    /// 
-    /// * `peaks` - The maximum value that each individual ring can create. 
-    /// Can be any positive real number but will later be normalized compared to other rings.
-    /// 
-    /// * `stddevs` - The standard deviations of each individual ring.
-    /// 
-    /// ### Returns
-    /// 2d array (`ndarray::ArrayD`) of `f64` values, where each dimension is `diameter` in size.
-    pub fn multi_gaussian_donut_2d(diameter: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
-        if means.len() != peaks.len() || means.len() != stddevs.len() {
-            panic!("Function \"multi_gaussian_donut_2d\" expects each mean parameter to be accompanied by a peak and stddev parameter!");
-        }
-        let radius = diameter as f64 / 2.0;
-        let inverse_radius = 1.0 / radius;
-        let mut out = ndarray::ArrayD::zeros(IxDyn(&[diameter, diameter]));
-        let x0 = radius;
-        let y0 = radius;
-        for i in 0..out.shape()[0] {
-            for j in 0..out.shape()[1] {
-                let x1 = i as f64;
-                let y1 = j as f64;
-                let dist = ((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0)).sqrt();
-                if dist <= radius { 
-                    let mut sum = 0.0;
-                    for i in 0..means.len() {
-                        sum += super::sample_normal(dist * inverse_radius, means[i], stddevs[i]) * peaks[i].abs();
-                    }
-                    out[[i, j]] = sum;
-                }
-                else { 
-                    out[[i, j]] = 0.0
-                }
-            }
-        }
-        out
-    }
-
-    pub fn game_of_life() -> ndarray::ArrayD<f64> {
-        let mut out = ndarray::ArrayD::from_elem(vec![3 as usize, 3], 1.0);
-        out[[1, 1]] = 0.0;
-        out
-    }
-}
-
-/// A collection of common growth functions.
-pub mod growth_functions {
-    // Standard unimodal, gaussian lenia growth function.
-    // param[0]: mu (the mean / the highest point of the growth function)
-    // param[1]: stddev (standard deviation)
-    pub fn standard_lenia(num: f64, params: &[f64]) -> f64 {
-        (2.0 * super::sample_normal(num, params[0], params[1])) - 1.0
-    }
-
-    pub fn game_of_life(num: f64, params: &[f64]) -> f64 {
-        let index = (num * 9.0).round() as usize;
-        if index == 2 { 0.0 }
-        else if index == 3 { 1.0 }
-        else {-1.0 }
-    }
-
-    pub fn constant(num: f64, params: &[f64]) -> f64 {
-        params[0]
-    }
-}
-
-/// A collection of initial randomness generators for the simulator.
-pub mod seeders {
-    use rand::Rng;
-
-    /// Generates an n-dimensional field with uniformly random values.
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `shape` - Shape of the field to generate and fill.
-    /// 
-    /// * `scaler` - Random values are generated in the range `[0.0..scaler]` if `discrete` is `false`.
-    /// If `discrete` is `true` then controls the probability of generating a `1.0` as opposed to `0.0`.
-    /// 
-    /// * `discrete` - If `true` then generates only values `0.0` and `1.0`.
-    /// 
-    /// ### Returns
-    /// n-dimensional array (`ndarray::ArrayD`) of `f64` values, with the shape defined by `shape` parameter.
-    pub fn random_uniform(shape: &[usize], scaler: f64, discrete: bool) -> ndarray::ArrayD<f64> {
-        let mut generator = rand::thread_rng();
-        ndarray::ArrayD::from_shape_fn(shape, |_| {
-            if discrete { 
-                ((scaler + generator.gen::<f64>()).floor()).clamp(0.0, 1.0) 
-            }
-            else { 
-                scaler * generator.gen::<f64>() 
-            }
-        })
-    }
-
-    /// Generates an n-dimensional field with uniformly random values in an n-dimensional hypercube
-    /// placed at the center of the field.
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `shape` - Shape of the field to generate.
-    /// 
-    /// * `radius` - Radius (the apothem) of the hypercube to fill with random values.
-    /// 
-    /// * `scaler` - Random values are generated in the range `[0.0..scaler]` if `discrete` is `false`.
-    /// If `discrete` is `true` then controls the probability of generating a `1.0` as opposed to `0.0`.
-    /// 
-    /// * `discrete` - If `true` then generates only values `0.0` and `1.0`.
-    /// 
-    /// ### Returns
-    /// n-dimensional array (`ndarray::ArrayD`) of `f64` values, with the shape defined by `shape` parameter.
-    pub fn random_hypercubic(shape: &[usize], radius: usize, scaler: f64, discrete: bool) -> ndarray::ArrayD<f64> {
-        let mut out = ndarray::ArrayD::from_elem(shape, 0.0);
-        let mut cube_dims: Vec<usize> = Vec::new();
-        for dim in shape {
-            if *dim < (radius * 2) { cube_dims.push(*dim); }
-            else { cube_dims.push(radius * 2); }
-        }
-        let cube = random_uniform(&cube_dims, scaler, discrete);
-        cube.assign_to(out.slice_each_axis_mut(
-            |a| ndarray::Slice {
-                start: (a.len/2 - cube.shape()[a.axis.index()]/2) as isize,
-                end: Some((
-                    a.len/2
-                    + cube.shape()[a.axis.index()]/2 
-                ) as isize),
-                step: 1
-            }
-        ));
-        out
-    }
-
-    /// Generates an n-dimensional field with multiple n-dimensional hypercubes, filled with 
-    /// uniformly random values, placed at random locations in the field. 
-    /// 
-    /// Overlapping hypercubes will add together in the final result.
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `shape` - Shape of the field to generate.
-    /// 
-    /// * `radius` - Radius (the apothem) of the hypercubes to fill with random values.
-    /// 
-    /// * `patches` - The number of hypercubes filled with random values to generate.
-    /// 
-    /// * `scaler` - Random values are generated in the range `[0.0..scaler]` if `discrete` is `false`.
-    /// If `discrete` is `true` then controls the probability of generating a `1.0` as opposed to `0.0`.
-    /// 
-    /// * `discrete` - If `true` then generates only values `0.0` and `1.0`.
-    /// 
-    /// ### Returns
-    /// n-dimensional array (`ndarray::ArrayD`) of `f64` values, with the shape defined by `shape` parameter.
-    pub fn random_hypercubic_patches(shape: &[usize], radius: usize, patches:usize, scaler:f64, discrete: bool) -> ndarray::ArrayD<f64> {
-        let mut generator = rand::thread_rng();
-        let mut buf: Vec<ndarray::ArrayD<f64>> = Vec::new();
-        let mut cube_dims: Vec<usize> = Vec:: new();
-        for dim in shape {
-            if *dim < (radius * 2) {
-                cube_dims.push(*dim - 2);
-            }
-            else {
-                cube_dims.push(radius);
-            }
-        }
-        for _ in 0..patches {
-            let mut patch = ndarray::ArrayD::from_elem(shape, 0.0);
-            random_uniform(&cube_dims, scaler, discrete).assign_to(patch.slice_each_axis_mut(
-                |a| {
-                    let randindex = generator.gen_range(0..(a.len - cube_dims[a.axis.index()]));
-                    ndarray::Slice {
-                        start: randindex as isize,
-                        end: Some((randindex + cube_dims[a.axis.index()]) as isize),
-                        step: 1,
-                    }
-                }
-            ));
-            buf.push(patch);
-        }
-        let mut out = ndarray::ArrayD::from_elem(shape, 0.0);
-        for i in 0..patches {
-            out.zip_mut_with(&buf[i], 
-                |a, b| { 
-                    *a = (*a + *b).clamp(0.0, 1.0);
-                }
-            )
-        }
-        out
-    }
-}
+mod fft;
+pub mod lenias;
+pub mod kernels;
+pub mod growth_functions;
+pub mod seeders;
 
 /// Samples the normal distribution where the peak (at `x = mu`) is 1.
 /// This is not suitable for use as a gaussian probability density function!
@@ -291,7 +56,8 @@ impl<L: Lenia> Simulator<L> {
     /// kernel changes, channel additions or any other parameter changes from the defaults
     /// of the specific `Lenia` instance implementation. 
     /// 
-    /// Call this if the shape of the channels needs to be changed. 
+    /// Call this if the shape of the channels needs to be changed, or a major restructuring of
+    /// channels and/or convolution channels is wanted.
     /// 
     /// ### Arguments
     /// 
@@ -518,178 +284,11 @@ pub trait Lenia {
     fn iterate(&mut self);
 }
 
-/// Instance of the standard Lenia system with a 2d field and pre-set parameters to facilitate
-/// the creation of the ***Orbium unicaudatus*** glider - the hallmark of the Lenia system.
-/// 
-/// This version of Lenia does not allow for adding extra channels nor convolution channels. 
-/// In addition, channel weights are not available for this version of Lenia.
-/// 
-/// Changeable parameters include the timestep a.k.a. integration step **dt**, 
-/// the **growth function**, and the **kernel** given that the kernel is 2-dimensional. 
-pub struct StandardLenia2D {
-    dt: f64,
-    channel: Vec<Channel>,
-    shape: Vec<usize>,
-    convolution_buffer: Vec<ndarray::ArrayD<Complex<f64>>>,
-    conv_channel: Vec<ConvolutionChannel>,
-    forward_fft_instances: Vec<fft::PreplannedFFTND>,
-    inverse_fft_instances: Vec<fft::PreplannedFFTND>,
-}
-
-impl StandardLenia2D {
-    const STANDARD_LENIA_2D_KERNEL_SIZE: usize = 28;
-}
-
-impl Lenia for StandardLenia2D {
-    /// Create and initialize a new instance of "Standard Lenia" in 2D. This version of Lenia
-    /// can have only a single channel and a single convolution channel. It also does not
-    /// support any weights, as it can be encoded within the `dt` parameter. 
-    /// 
-    /// The size of either dimension may not be smaller than 28 pixels. 
-    /// 
-    /// By default the kernel, growth function and dt parameter are set such that when 
-    /// simulating, the simulation is capable of producing the ***Orbium unicaudatus*** glider.
-    fn new(shape: &[usize]) -> Self {
-        if shape.len() < 2 || shape.len() > 2 { 
-            panic!("Expected 2 dimensions for Standard Lenia! Found {}", shape.len()); 
-        }
-        let mut proper_dims: Vec<usize> = Vec::new();
-        for (i, dim) in shape.iter().enumerate() {
-            if *dim < StandardLenia2D::STANDARD_LENIA_2D_KERNEL_SIZE {
-                println!("Dimension {} is extremely small ({} pixels). Resized dimension to the minimum of {} pixels.", i, *dim, StandardLenia2D::STANDARD_LENIA_2D_KERNEL_SIZE);
-                proper_dims.push(StandardLenia2D::STANDARD_LENIA_2D_KERNEL_SIZE);
-            }
-            else {
-                proper_dims.push(*dim);
-            }
-        }
-        let kernel = Kernel::from(
-            kernels::gaussian_donut_2d(
-                StandardLenia2D::STANDARD_LENIA_2D_KERNEL_SIZE, 
-                1.0/3.35
-            ), 
-            &proper_dims
-        );
-        let conv_field = ndarray::ArrayD::from_elem(proper_dims, Complex::new(0.0, 0.0));
-        let conv_channel = ConvolutionChannel {
-            input_channel: 0,
-            input_buffer: conv_field.clone(),
-            kernel: kernel,
-            field: conv_field,
-            growth: growth_functions::standard_lenia,
-            growth_params: vec![0.15, 0.017],
-        };
-
-        let channel = Channel {
-            field: conv_channel.field.clone(),
-            inverse_weight_sums: vec![1.0],
-        };
-
-        let mut channel_shape = Vec::new();
-        for dim in shape {
-            channel_shape.push(*dim);
-        }
-        
-        StandardLenia2D{
-            forward_fft_instances: vec![fft::PreplannedFFTND::preplan_by_prototype(&channel.field, false)],
-            inverse_fft_instances: vec![fft::PreplannedFFTND::preplan_by_prototype(&channel.field, true)],
-            dt: 0.1,
-            channel: vec![channel],
-            shape: channel_shape,
-            convolution_buffer: vec![conv_channel.field.clone()],
-            conv_channel: vec![conv_channel],
-        }
-    }
-
-    fn iterate(&mut self) {
-        self.conv_channel[0].input_buffer.zip_mut_with(&self.channel[0].field, 
-            |a, b| {
-                a.re = b.re;
-                a.im = 0.0;
-            }
-        );
-        self.forward_fft_instances[0].transform(
-            &mut self.conv_channel[0].input_buffer, 
-            &mut self.convolution_buffer[0], 
-            &[0, 1]
-        );
-        self.convolution_buffer[0].zip_mut_with(&self.conv_channel[0].kernel.transformed, 
-            |a, b| {    // Complex multiplication without cloning
-                let ac = a.re * b.re;
-                let bd = a.im * b.im;
-                let real = ac - bd;
-                a.im = ((a.re + a.im) * (b.re + b.im)) - real;
-                a.re = real;
-            }
-        );
-        self.inverse_fft_instances[0].transform(
-            &mut self.convolution_buffer[0], 
-            &mut self.conv_channel[0].field, 
-            &[1, 0]
-        );
-        self.channel[0].field.zip_mut_with(&self.conv_channel[0].field, 
-            |a, b| {
-                a.re = (a.re + ((self.conv_channel[0].growth)(b.re, &self.conv_channel[0].growth_params) * self.dt)).clamp(0.0, 1.0);
-                a.im = 0.0;
-            }
-        );
-    }
-
-    fn set_channels(&mut self, num_channels: usize) {
-        println!("Initializing channels not available for Standard Lenia! Try using Extended Lenia instead.");
-    }
-
-    fn set_conv_channels(&mut self, num_conv_channels: usize) {
-        println!("Adding convolution channels not available for Standard Lenia! Try using Extended Lenia instead.");
-    }
-
-    fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize) {
-        println!("Convolution output weights are not available for Standard Lenia! Try usingh Extended Lenia instead.");
-    }
-
-    fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize) {
-        self.conv_channel[0].kernel = Kernel::from(kernel, self.channel[0].field.shape());
-    }
-
-    fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize) {
-        self.conv_channel[0].growth = f;
-        self.conv_channel[0].growth_params = growth_params;
-    }
-
-    fn set_dt(&mut self, new_dt: f64) {
-        self.dt = new_dt;
-    }
-
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    }
-
-    fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
-        &self.channel[0].field
-    }
-
-    fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>> {
-        &mut self.channel[0].field
-    }
-
-    fn dt(&self) -> f64 {
-        self.dt
-    }
-
-    fn channels(&self) -> usize {
-        1 as usize
-    }
-
-    fn conv_channels(&self) -> usize {
-        1 as usize
-    }
-}
-
 /// The `Channel` struct is a wrapper for holding the data of a single channel in a 
 /// `Lenia` simulation. The struct also implements functionality for applying the
 /// weights of the convolution channels and summing up the final result in any
 /// Lenia system more complex than the Standard Lenia. 
-struct Channel {
+pub struct Channel {
     pub field: ndarray::ArrayD<Complex<f64>>,
     pub inverse_weight_sums: Vec<f64>,
 }
@@ -697,7 +296,7 @@ struct Channel {
 /// The `ConvolutionChannel` struct holds relevant data for the convolution step of the
 /// Lenia simulation. This includes the kernel, the intermittent convolution step, and the 
 /// growth function.
-struct ConvolutionChannel {
+pub struct ConvolutionChannel {
     pub input_channel: usize,
     pub input_buffer: ndarray::ArrayD<Complex<f64>>,
     pub field: ndarray::ArrayD<Complex<f64>>,
@@ -717,9 +316,28 @@ pub struct Kernel {
 
 impl Kernel {
     /// Creates a new Kernel struct from an n-dimensional array (`ndarray::ArrayD`) of `f64` values.
+    /// 
     /// Creates the normalized version of the kernel.
+    /// 
     /// Creates a version of the kernel that has been transformed using discrete-fourier-transform, 
     /// and shifted, for future use in fast-fourier-transform based convolution. 
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `kernel` - Array (`ndarray::ArrayD`) of `f64` values that define the weights of the kernel.
+    /// 
+    /// * `channel_shape` - Shape of the channel the kernel is supposed to act on.
+    /// 
+    /// ### Returns
+    /// 
+    /// A `Kernel` instance containing the base kernel, normalized version of the base kernel and 
+    /// a fourier-transformed kernel representation. 
+    /// 
+    /// ### Panics
+    /// 
+    /// * If the number of axes of the `kernel` and `channel_shape` are not equal.
+    /// 
+    /// * If any of the corresponding axis lengths in `kernel` are greater than in `channel_shape`.
     pub fn from(kernel: ndarray::ArrayD<f64>, channel_shape: &[usize]) -> Self {
         let mut normalized_kernel = kernel.clone();
         let mut shifted_and_fft = ndarray::ArrayD::from_elem(channel_shape, Complex::new(0.0, 0.0));
