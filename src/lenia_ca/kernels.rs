@@ -193,6 +193,15 @@ pub fn moore1() -> ndarray::ArrayD<f64> {
     out
 }
 
+/// Gives a kernel the size of 1 unit containing `0.0`, but with as many dimensions as `shape`.
+pub fn empty(shape: &[usize]) -> ndarray::ArrayD<f64> {
+    let unit_shape: Vec<usize> = Vec::new();
+    for _ in shape {
+        unit_shape.push(1);
+    }
+    ndarray::ArrayD::<f64>::zeros(unit_shape)
+}
+
 fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
     let mut out: f64 = 0.0;
     for i in 0..a.len() {

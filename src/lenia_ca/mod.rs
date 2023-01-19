@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
+#[cfg(target_has_atomic = "ptr")]
 
 use ndarray::{self, Axis, Slice, Order};
 use num_complex::Complex;
@@ -46,9 +47,9 @@ impl<L: Lenia> Simulator<L> {
     /// 
     /// ### Returns
     /// A new instance of a `Simulator`. 
-    pub fn new(channel_shape: Vec<usize>) -> Self {
+    pub fn new(channel_shape: &[usize]) -> Self {
         Simulator{
-            sim: L::new(&channel_shape),
+            sim: L::new(channel_shape),
         }
     }
 
@@ -67,6 +68,82 @@ impl<L: Lenia> Simulator<L> {
         self.sim = L::new(&channel_shape);
     }
 
+    /// Set the number of channels in the `Lenia` instance. 
+    /// 
+    /// **In case the number of channels
+    /// is less than the current number of channels, it is up to the user to make sure that
+    /// no convolution channel tries to use a dropped channel as its source!**
+    /// 
+    /// All values in newly created channels will be set to `0.0`.
+    /// 
+    /// The weights from all convolution channels into any newly created channels will start
+    /// off at `0.0`.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `channels` - The number of channels the `Lenia` instance should have.
+    /// 
+    /// ### Panics
+    /// 
+    /// If `channels` is `0.0`.
+    pub fn set_channels(&mut self, channels: usize) {
+        if channels == 0 {
+            panic!("Simulator::set_channels: Attempting to set the number of channels to 0. This is not allowed.");
+        }
+        if channels == self.sim.channels() { return; }
+        self.sim.set_channels(channels);
+    }
+
+    /// Set the number of convolution channels in the `Lenia` instance. 
+    /// 
+    /// If the new number of 
+    /// convolution channels is less than currently, then any convolution channels with an index
+    /// higher than the new number of channels will be dropped, and their corresponding contribution
+    /// to weighted averages for summing purged. 
+    /// 
+    /// If the new number of convolution channels is greater than currently then any new 
+    /// convolution channels will need to have their kernels and growth functions set. In addition,
+    /// weights for the new convolution channels will default to `0.0`. 
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `convolution_channels` - The number of convolution channels the `Lenia` instance should have.
+    /// 
+    /// ### Panics
+    /// 
+    /// If `convolution_channels` is `0.0`.
+    pub fn set_convolution_channels(&mut self, convolution_channels: usize) {
+        if convolution_channels == 0 {
+            panic!("Simulator::set_convolution_channels: Attempting to set the number of convolution channels to 0. This is not allowed.");
+        }
+        if convolution_channels == self.convolution_channels() { return; }
+        self.sim.set_conv_channels(convolution_channels);
+    }
+
+    /// Set the source channel a given convolution channel should act on. 
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `convolution_channel` - The convolution channel which will have its source changed.
+    /// 
+    /// * `source_channel` - The channel that the convolution channel should use as its source
+    /// for convoluting.
+    /// 
+    /// ### Panics
+    /// 
+    /// * If the specified `convolution_channel` does not exist.
+    /// 
+    /// * If the specified `source_channel` does not exist.
+    pub fn set_convolution_channel_source(&mut self, convolution_channel: usize, source_channel: usize) {
+        if convolution_channel >= self.sim.conv_channels() {
+            panic!("Simulator::set_convolution_channel_source: Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
+        }
+        if convolution_channel >= self.sim.channels() {
+            panic!("Simulator::set_convolution_channel_source: Specified channel (index {}) does not exist. Current number of channels: {}.", source_channel, self.sim.channels());
+        }
+        self.sim.set_source_channel(convolution_channel, source_channel);
+    }
+
     /// Set the kernel of the specified convolution channel. 
     /// 
     /// ### Arguments
@@ -76,7 +153,14 @@ impl<L: Lenia> Simulator<L> {
     /// `Lenia` instance. 
     /// 
     /// * `convolution_channel` - The convolution channel to which the new kernel is to be assigned.
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `convolution_channel` does not exist. 
     pub fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, convolution_channel: usize) {
+        if convolution_channel >= self.sim.conv_channels() {
+            panic!("Simulator::set_kernel: Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
+        }
         self.sim.set_kernel(kernel, convolution_channel);
     }
 
@@ -90,7 +174,14 @@ impl<L: Lenia> Simulator<L> {
     /// 
     /// * `convolution_channel` - The convoltution channel to which the new growth function and
     /// parameters are to be assigned.
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `convolution_channel` does not exist. 
     pub fn set_growth_function(&mut self, f: fn(f64, &[f64]) -> f64, growth_parameters: Vec<f64>, convolution_channel: usize) {
+        if convolution_channel >= self.sim.conv_channels() {
+            panic!("Simulator::set_growth_function: Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
+        }
         self.sim.set_growth(f, growth_parameters, convolution_channel);
     }
 
@@ -118,7 +209,14 @@ impl<L: Lenia> Simulator<L> {
     /// from which to fill the channel's data.
     /// 
     /// * `channel` - Index of the channel to fill. 
+    ///
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist. 
     pub fn fill_channel(&mut self, data: &ndarray::ArrayD<f64>, channel: usize) {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::fill_channel: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
         let channel_data = self.sim.get_data_as_mut_ref(channel);
         channel_data.zip_mut_with(data, 
             |a, b| {
@@ -135,8 +233,16 @@ impl<L: Lenia> Simulator<L> {
     /// * `channel` - Index of the channel to copy data from.
     /// 
     /// ### Returns
+    /// 
     /// An array (`ndarray::ArrayD`) of the real components of the channel's data.
-    pub fn get_channel_data_f64(&self, channel: usize) -> ndarray::ArrayD<f64> {
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist. 
+    pub fn get_data_as_f64(&self, channel: usize) -> ndarray::ArrayD<f64> {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::get_channel_data_as_f64: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
         let out = self.sim.get_data_as_ref(channel).map(
             |a| {
                 a.re
@@ -145,20 +251,25 @@ impl<L: Lenia> Simulator<L> {
         out
     }
 
-    /// Retrieve a referenced copy ("shallow-copy") of the specified channel's data. 
-    /// Since "deep-copying" `f64` takes about the same amount of time and memory 
-    /// on most modern machines as making a copy of references,
-    /// then the use case for this is nearly nonexistent. 
-    pub fn get_channel_data_as_ref(&self, channel: usize) -> ndarray::ArrayD<&f64> {
-        let out = self.sim.get_data_as_ref(channel).map(
-            |a| {
-                &a.re
-            }
-        );
-        out
+    /// Retrieve a referenced copy ("shallow-copy") of the specified channel's data. Use this if
+    /// you want to prevent the creation of a separate owned array. 
+    /// 
+    /// This is faster than `get_data_as_f64` as it
+    /// does not create an array of values, but rather gives the reference to the data
+    /// directly. The downside is that the data is of the form that `Lenia` internals work on, 
+    /// which is `Complex<f64>`. 
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist. 
+    pub fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
+        self.sim.get_data_as_ref(channel)
     }
 
-    /// Retrieve the real component of a channel's data as mutable references. This allows for
+    /// Retrieve the real components of a channel's data as mutable references. This allows for
     /// modification of the channel's current data directly. 
     /// 
     /// ### Arguments
@@ -166,14 +277,48 @@ impl<L: Lenia> Simulator<L> {
     /// * `channel` - Index of the channel from which the mutable references are to be taken.
     /// 
     /// ### Returns
+    /// 
     /// An n-dimensional array (`ndarray::ArrayD`) of references to the channel's data's real components.
-    pub fn get_channel_data_as_mut_ref(&mut self, channel: usize) -> ndarray::ArrayD<&mut f64> {
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist. 
+    pub fn get_data_as_mut_f64_ref(&mut self, channel: usize) -> ndarray::ArrayD<&mut f64> {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
         let out = self.sim.get_data_as_mut_ref(channel).map_mut(
             |a| {
                 &mut a.re
             }
         );
         out
+    }
+
+    /// Retrieve a mutable reference to the specified channel's data. This allows for modification
+    /// of the channel's data directly. 
+    /// 
+    /// This is faster than `get_data_as_mut_f64_ref` as it
+    /// does not create an array of references, but rather gives the mutable reference to the data
+    /// directly. The downside is that the data is of the form that `Lenia` internals work on, 
+    /// which is `Complex<f64>`. 
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `channel` - Index of the channel from which the mutable reference to data is to be taken.
+    /// 
+    /// ### Returns
+    /// 
+    /// Mutable reference to the specified channel's data.
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist. 
+    pub fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>> {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
+        self.sim.get_data_as_mut_ref(channel)
     }
 
     /// Receives a 2d array (`ndarray::Array2`) of `f64` values of a 2d slice of a channel's data. 
@@ -189,9 +334,17 @@ impl<L: Lenia> Simulator<L> {
     /// The entries for axes selected in `display_axes` can be any number, and will be disregarded. 
     /// 
     /// ### Returns
+    /// 
     /// 2d array (`ndarray::Array2`) filled with `f64` values where the dimension lengths are 
     /// the same as the axis lengths of the axes chosen with `display axes`.
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist. 
     pub fn get_frame(&self, channel: usize, display_axes: &[usize; 2], dimensions: &[usize]) -> ndarray::Array2<f64> {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
         let data_ref = self.sim.get_data_as_ref(channel);
         return data_ref.slice_each_axis(
             |a|{
@@ -245,9 +398,9 @@ pub trait Lenia {
     fn new(shape: &[usize]) -> Self;
     /// Sets the number of channels in the `Lenia` instance. 
     /// 
-    /// *If the new number of channels is less than before then the user is responsible for re-making
+    /// **If the new number of channels is fewer than currently then the user is responsible for re-making
     /// the convolution channels or deleting invalidated convolution channels and
-    /// make sure that no convolution channel tries to convolute a non-existent channel!*
+    /// make sure that no convolution channel tries to convolute a non-existent channel!**
     /// 
     /// For the above reason, the `Simulator` struct does not implement a function to
     /// reduce the number of channels, but rather asks to remake the whole `Lenia` instance
@@ -255,17 +408,30 @@ pub trait Lenia {
     fn set_channels(&mut self, num_channels: usize);
     /// Sets the number of convolution channels in the `Lenia` instance. 
     /// 
-    /// Any convolution channels
+    /// * Any convolution channels
     /// that have an index larger than the new number of channels **will be dropped**. Conversely,
     /// no convolution channels get invalidated if the new number of convolution channels is
     /// greater than the previous number of convolution channels. 
+    /// 
+    /// * Any newly initialized convolution channels will have to have their kernels and
+    /// growth functions added. By default all channels will use a weight of `0.0` for the new
+    /// channels. 
     fn set_conv_channels(&mut self, num_conv_channels: usize);
+    /// Sets the source channel for a convolution channel.
+    fn set_source_channel(&mut self, conv_channel: usize, src_channel: usize);
     /// Sets the convolution kernel for a convolution channel.
     fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize);
     /// Sets the growth function for a convolution channel.
     fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize);
-    /// Sets the weights of a convolution channel output. 
-    fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize);
+    /// Sets the weights for input into a channel from convolution channels for summing. 
+    /// 
+    /// * If the length of `new weights` is less than the number of convolution channels then
+    /// the weight for the uncovered convolution channels defaults to `0.0`. 
+    /// 
+    /// * If the length of `new weights` is greater than the number of convolution channels then
+    /// the excess weights will be disgarded, and their effect for the weighted average on the 
+    /// channel is not taken into account.
+    fn set_weights(&mut self, new_weights: &[f64], channel: usize);
     /// Sets the dt parameter of the `Lenia` instance. 
     fn set_dt(&mut self, new_dt: f64);
     /// Returns a reference ("shallow-copy") to a channel's current data. 
@@ -280,19 +446,26 @@ pub trait Lenia {
     fn channels(&self) -> usize;
     /// Returns the number of convolution channels in the `Lenia` instance.
     fn conv_channels(&self) -> usize;
+    /// Returns the weights of the specified channel.
+    fn weights(&self, channel: usize) -> &[f64];
     /// Calculates the next state of the `Lenia` instance, and updates the data in channels accordingly.
     fn iterate(&mut self);
 }
 
+
+#[derive(Clone)]
 /// The `Channel` struct is a wrapper for holding the data of a single channel in a 
 /// `Lenia` simulation. The struct also implements functionality for applying the
 /// weights of the convolution channels and summing up the final result in any
 /// Lenia system more complex than the Standard Lenia. 
 pub struct Channel {
     pub field: ndarray::ArrayD<Complex<f64>>,
-    pub inverse_weight_sums: Vec<f64>,
+    pub weights: Vec<f64>,
+    pub weight_sum_reciprocal: f64,
 }
 
+
+#[derive(Clone)]
 /// The `ConvolutionChannel` struct holds relevant data for the convolution step of the
 /// Lenia simulation. This includes the kernel, the intermittent convolution step, and the 
 /// growth function.
@@ -305,6 +478,8 @@ pub struct ConvolutionChannel {
     pub growth_params: Vec<f64>,
 }
 
+
+#[derive(Clone)]
 /// The `Kernel` struct holds the data of a specific kernel to be used for convolution in
 /// the Lenia simulation. It also implements the necessary conversions to normalize a
 /// kernel and prepare it for convolution using fast-fourier-transform. 
