@@ -12,11 +12,12 @@
 /// Preplanning functionality in the form of PreplannedFFT and PreplannedFFTND 
 /// structs added by Birdbrain. 
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 use rustfft::{Fft, FftNum, FftPlanner, FftDirection};
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::{Zero};
 use ndarray::{Dimension, Array, Array2};
+
 
 /// `PreplannedFFT` struct is a container for all the relevant data for a determined length
 /// 1D Fast-Fourier-Transform. 
@@ -25,6 +26,17 @@ pub struct PreplannedFFT{
     scratch_space: Vec<Complex<f64>>,
     inverse: bool,
     length: usize,
+}
+
+impl fmt::Debug for PreplannedFFT {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreplannedFFT")
+         .field("fft", &"Arc<dyn rustfft::Fft<f64>>")
+         .field("scratch_space", &self.scratch_space)
+         .field("inverse", &self.inverse)
+         .field("length", &self.length)
+         .finish()
+    }
 }
 
 impl PreplannedFFT{
@@ -121,6 +133,8 @@ impl PreplannedFFT{
     }
 }
 
+
+#[derive(Debug)]
 /// `PreplannedFFTND` struct is for preplanning fast-fourier-transforms that work on 
 /// n-dimensional arrays.
 pub struct PreplannedFFTND {

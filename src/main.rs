@@ -17,7 +17,7 @@ fn main() {
     let kernel_diameter = 68;
     let channel_shape = vec![SIDE_LEN, SIDE_LEN];
 
-    let mut lenia_simulator = lenia_ca::Simulator::<StandardLenia2D>::new(&channel_shape);
+    let mut lenia_simulator = lenia_ca::Simulator::<ExtendedLenia>::new(&channel_shape);
     lenia_simulator.fill_channel(
         &lenia_ca::seeders::random_hypercubic(&channel_shape, 15, 0.4, false), 
         0
@@ -66,7 +66,7 @@ fn main() {
                 lenia_simulator.fill_channel(
                     &lenia_ca::seeders::random_hypercubic_patches(
                         &[SIDE_LEN, SIDE_LEN], 
-                        SIDE_LEN / 8, 
+                        SIDE_LEN / 7, 
                         10, 
                         0.45, 
                         false

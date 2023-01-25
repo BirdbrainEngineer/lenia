@@ -195,7 +195,7 @@ pub fn moore1() -> ndarray::ArrayD<f64> {
 
 /// Gives a kernel the size of 1 unit containing `0.0`, but with as many dimensions as `shape`.
 pub fn empty(shape: &[usize]) -> ndarray::ArrayD<f64> {
-    let unit_shape: Vec<usize> = Vec::new();
+    let mut unit_shape: Vec<usize> = Vec::new();
     for _ in shape {
         unit_shape.push(1);
     }

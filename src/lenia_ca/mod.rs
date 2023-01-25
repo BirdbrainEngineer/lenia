@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 #[cfg(target_has_atomic = "ptr")]
 
+use std::fmt;
 use ndarray::{self, Axis, Slice, Order};
 use num_complex::Complex;
 mod fft;
@@ -429,7 +430,7 @@ pub trait Lenia {
     /// the weight for the uncovered convolution channels defaults to `0.0`. 
     /// 
     /// * If the length of `new weights` is greater than the number of convolution channels then
-    /// the excess weights will be disgarded, and their effect for the weighted average on the 
+    /// the excess weights will be disregarded, and their effect for the weighted average on the 
     /// channel is not taken into account.
     fn set_weights(&mut self, new_weights: &[f64], channel: usize);
     /// Sets the dt parameter of the `Lenia` instance. 
@@ -453,7 +454,7 @@ pub trait Lenia {
 }
 
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// The `Channel` struct is a wrapper for holding the data of a single channel in a 
 /// `Lenia` simulation. The struct also implements functionality for applying the
 /// weights of the convolution channels and summing up the final result in any
@@ -478,8 +479,21 @@ pub struct ConvolutionChannel {
     pub growth_params: Vec<f64>,
 }
 
+impl fmt::Debug for ConvolutionChannel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConvolutionChannel")
+         .field("input_channel", &self.input_channel)
+         .field("input_buffer", &self.input_buffer)
+         .field("field", &self.field)
+         .field("kernel", &self.kernel)
+         .field("growth", &"fn(f64, &[f64]) -> f64")
+         .field("growth_params", &self.growth_params)
+         .finish()
+    }
+}
 
-#[derive(Clone)]
+
+#[derive(Clone, Debug)]
 /// The `Kernel` struct holds the data of a specific kernel to be used for convolution in
 /// the Lenia simulation. It also implements the necessary conversions to normalize a
 /// kernel and prepare it for convolution using fast-fourier-transform. 
