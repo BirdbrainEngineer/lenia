@@ -193,247 +193,6 @@ impl Lenia for StandardLenia2D {
 
 
 
-
-/* 
-/// `ExtendedLenia` struct implements the extended Lenia system, with support for n-dimensional
-/// channels, multiple channels, multiple kernels & growth functions (convolution channels) 
-/// and individual weights for convolution channels. 
-pub struct ExtendedLenia {
-    dt: f64,
-    channels: Vec<Arc<RwLock<Channel>>>,
-    shape: Vec<usize>,
-    conv_buffers: Vec<Arc<Mutex<ndarray::ArrayD<Complex<f64>>>>>,
-    conv_channels: Vec<Arc<RwLock<ConvolutionChannel>>>,
-    forward_fft_instances: Vec<Arc<Mutex<fft::PreplannedFFTND>>>,
-    inverse_fft_instances: Vec<Arc<Mutex<fft::PreplannedFFTND>>>,
-}
-
-impl ExtendedLenia {
-    const DEFAULT_KERNEL_SIZE: usize = 28;
-}
-
-impl Lenia for ExtendedLenia {
-    /// Create and initialize a new instance of "ExtendedLenia`. 
-    fn new(shape: &[usize]) -> Self {
-        for (i, dim) in shape.iter().enumerate() {
-            if *dim < Self::DEFAULT_KERNEL_SIZE {
-                panic!("Axis {} is extremely small ({} pixels). Minimum size of each axis for 2D Standard Lenia is {} pixels.", i, *dim, Self::DEFAULT_KERNEL_SIZE);
-            }
-        }
-        let kernel = Kernel::from(
-            kernels::gaussian_donut_nd(
-                Self::DEFAULT_KERNEL_SIZE, 
-                shape.len(),
-                1.0/6.7
-            ), 
-            shape
-        );
-        let conv_field = ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0));
-        let conv_channel = ConvolutionChannel {
-            input_channel: 0,
-            input_buffer: conv_field.clone(),
-            kernel: kernel,
-            field: conv_field,
-            growth: growth_functions::standard_lenia,
-            growth_params: vec![0.15, 0.017],
-        };
-
-        let channel = Channel {
-            field: conv_channel.field.clone(),
-            weights: vec![1.0],
-            weight_sum_reciprocal: 1.0,
-        };
-
-        let mut channel_shape = Vec::new();
-        for dim in shape {
-            channel_shape.push(*dim);
-        }
-        
-        ExtendedLenia{
-            forward_fft_instances: vec![Arc::new(Mutex::new(fft::PreplannedFFTND::preplan_by_prototype(&channel.field, false)))],
-            inverse_fft_instances: vec![Arc::new(Mutex::new(fft::PreplannedFFTND::preplan_by_prototype(&channel.field, true)))],
-            dt: 0.1,
-            channels: vec![Arc::new(RwLock::new(channel))],
-            shape: channel_shape,
-            conv_buffers: vec![Arc::new(Mutex::new(conv_channel.field.clone()))],
-            conv_channels: vec![Arc::new(RwLock::new(conv_channel))],
-        }
-    }
-
-    fn iterate(&mut self) {
-        let 
-        
-
-        self.conv_channel[0].input_buffer.zip_mut_with(&self.channel[0].field, 
-            |a, b| {
-                a.re = b.re;
-                a.im = 0.0;
-            }
-        );
-        self.forward_fft_instances[0].transform(
-            &mut self.conv_channel[0].input_buffer, 
-            &mut self.convolution_buffer[0], 
-            &[0, 1]
-        );
-        self.convolution_buffer[0].zip_mut_with(&self.conv_channel[0].kernel.transformed, 
-            |a, b| {    // Complex multiplication without cloning
-                let ac = a.re * b.re;
-                let bd = a.im * b.im;
-                let real = ac - bd;
-                a.im = ((a.re + a.im) * (b.re + b.im)) - real;
-                a.re = real;
-            }
-        );
-        self.inverse_fft_instances[0].transform(
-            &mut self.convolution_buffer[0], 
-            &mut self.conv_channel[0].field, 
-            &[1, 0]
-        );
-        self.channel[0].field.zip_mut_with(&self.conv_channel[0].field, 
-            |a, b| {
-                a.re = (a.re + ((self.conv_channel[0].growth)(b.re, &self.conv_channel[0].growth_params) * self.dt)).clamp(0.0, 1.0);
-                a.im = 0.0;
-            }
-        );
-    }
-
-    fn set_channels(&mut self, num_channels: usize) {
-        if num_channels <= self.channels.len() {
-            for i in (num_channels..self.channels.len()).rev() {
-                self.channels.remove(i);
-            }
-        }
-        else {
-            let weights_prototype: Vec<f64> = Vec::new();
-            for _ in self.channels[0].weights {
-                weights_prototype.push(0.0);
-            }
-            for _ in self.channels.len()..num_channels {
-                self.channels.push(
-                    Arc::new(RwLock::new(Channel { 
-                        field: ndarray::ArrayD::from_elem(self.shape.clone(), Complex{re: 0.0, im: 0.0}),
-                        weights: weights_prototype.clone(),
-                        weight_sum_reciprocal: 0.0,
-                    }
-                )));
-            }
-        }
-    }
-
-    fn set_conv_channels(&mut self, num_conv_channels: usize) {
-        if num_conv_channels <= self.conv_channels.len() {
-            for i in (num_conv_channels..self.conv_channels.len()).rev() {
-                self.conv_channels.remove(i);
-                self.conv_buffers.remove(i);
-            }
-            for channel in self.channels {
-                for i in (num_conv_channels..channel.weights.len()).rev() {
-                    channel.weights.remove(i);
-                }
-                let sum: f64 = channel.weights.iter().sum();
-                channel.weight_sum_reciprocal = 1.0 / sum;
-            }
-        }
-        else {
-            for _ in self.conv_channels.len()..num_conv_channels {
-                self.conv_channels.push(
-                    Arc::new(ConvolutionChannel { 
-                        input_channel: 0, 
-                        input_buffer: ndarray::ArrayD::from_elem(self.shape.clone(), Complex{re: 0.0, im: 0.0}), 
-                        field: ndarray::ArrayD::from_elem(self.shape.clone(), Complex{re: 0.0, im: 0.0}), 
-                        kernel: Kernel::from(kernels::empty(&self.shape), &self.shape), 
-                        growth: growth_functions::pass, 
-                        growth_params: vec![0.0],
-                    }
-                ));
-            }
-            for channel in self.channels {
-                for _ in channel.weights.len()..num_conv_channels {
-                    channel.weights.push(0.0);
-                }
-                let sum: f64 = channel.weights.iter().sum();
-                channel.weight_sum_reciprocal = 1.0 / sum;
-            }
-        }
-    }
-
-    fn set_weights(&mut self, new_weights: &[f64], channel: usize) {
-        let mut weights: Vec<f64>;
-        if new_weights.len() < self.conv_channels.len() {
-            weights = new_weights.clone().to_vec();
-            for _ in new_weights.len()..self.conv_channels.len() {
-                weights.push(0.0);
-            }
-        }
-        else {
-            for i in 0..self.conv_channels.len() {
-                weights.push(new_weights[i]);
-            }
-        }
-        let sum: f64 = weights.iter().sum();
-        self.channels[channel].weights = weights;
-        self.channels[channel].weight_sum_reciprocal = 1.0 / sum;
-    }
-
-    fn set_source_channel(&mut self, conv_channel: usize, src_channel: usize) {
-        self.conv_channels[conv_channel].input_channel = src_channel;
-    } // done
-
-    fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize) {
-        self.conv_channels[conv_channel].kernel = Kernel::from(kernel, &self.shape);
-    } // done
-
-    fn set_growth(&mut self, f: fn(f64, &[f64]) -> f64, growth_params: Vec<f64>, conv_channel: usize) {
-        self.conv_channels[conv_channel].growth = f;
-        self.conv_channels[conv_channel].growth_params = growth_params;
-    } // done
-
-    fn set_dt(&mut self, new_dt: f64) {
-        self.dt = new_dt;
-    } // done
-
-    fn shape(&self) -> &[usize] {
-        &self.shape
-    } // done
-
-    fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
-        &self.channels[channel].field
-    } // done
-
-    fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>> {
-        &mut self.channels[channel].field
-    } // done
-
-    fn dt(&self) -> f64 {
-        self.dt
-    } // done
-
-    fn channels(&self) -> usize {
-        self.channels.len()
-    } // done
-
-    fn conv_channels(&self) -> usize {
-        self.conv_channels.len()
-    } // done
-
-    fn weights(&self, channel: usize) -> &[f64] {
-        &self.channels[channel].weights
-    } // done
-}
-
-*/
-
-
-
-
-
-
-
-
-
-
-
-//#[derive(Debug)]
 /// `ExtendedLenia` struct implements the extended Lenia system, with support for n-dimensional
 /// channels, multiple channels, multiple kernels & growth functions (convolution channels) 
 /// and individual weights for convolution channels. 
@@ -523,8 +282,8 @@ impl Lenia for ExtendedLenia {
         for _ in 0..self.channels.len() {
             channel_rwlocks.push(Arc::new(RwLock::new(self.channels.remove(0))));
         }
-        for i  in 0..self.conv_channels.len() {
-            sources.push(self.conv_channels[i].input_channel);
+        for _ in 0..self.conv_channels.len() {
+            sources.push(self.conv_channels[0].input_channel);
             convolution_mutexes.push(Arc::new(Mutex::new(self.conv_channels.remove(0))));
         }
         for _ in 0..self.buffers.len() {
@@ -686,6 +445,8 @@ impl Lenia for ExtendedLenia {
         if num_conv_channels <= self.conv_channels.len() {
             for i in (num_conv_channels..self.conv_channels.len()).rev() {
                 self.conv_channels.remove(i);
+                self.forward_fft_instances.remove(i);
+                self.inverse_fft_instances.remove(i);
                 if i >= self.channels.len() {
                     self.buffers.remove(i);
                 }
@@ -704,7 +465,7 @@ impl Lenia for ExtendedLenia {
                     self.buffers.push(self.buffers[0].clone());
                 }
             }
-            for _ in self.conv_channels.len()..num_conv_channels {
+            for i in self.conv_channels.len()..num_conv_channels {
                 self.conv_channels.push(
                     ConvolutionChannel { 
                         input_channel: 0, 
@@ -715,6 +476,8 @@ impl Lenia for ExtendedLenia {
                         growth_params: vec![0.0],
                     }
                 );
+                self.forward_fft_instances.push(fft::PreplannedFFTND::preplan_by_prototype(&self.conv_channels[i].field, false));
+                self.inverse_fft_instances.push(fft::PreplannedFFTND::preplan_by_prototype(&self.conv_channels[i].field, true));
             }
             for channel in &mut self.channels {
                 for _ in channel.weights.len()..num_conv_channels {

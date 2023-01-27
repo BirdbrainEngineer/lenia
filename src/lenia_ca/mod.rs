@@ -139,7 +139,7 @@ impl<L: Lenia> Simulator<L> {
         if convolution_channel >= self.sim.conv_channels() {
             panic!("Simulator::set_convolution_channel_source: Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
         }
-        if convolution_channel >= self.sim.channels() {
+        if source_channel >= self.sim.channels() {
             panic!("Simulator::set_convolution_channel_source: Specified channel (index {}) does not exist. Current number of channels: {}.", source_channel, self.sim.channels());
         }
         self.sim.set_source_channel(convolution_channel, source_channel);
@@ -184,6 +184,25 @@ impl<L: Lenia> Simulator<L> {
             panic!("Simulator::set_growth_function: Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
         }
         self.sim.set_growth(f, growth_parameters, convolution_channel);
+    }
+
+    /// Set the convolution channel input weights for a specific channel.
+    /// 
+    /// * If the length of weights is greater than the number of convolution channels, 
+    /// then the weights with indexes not corresponding to a convolution channel
+    /// will be disregarded.
+    /// 
+    /// * If the length of weights is less than the number of convolution channels, 
+    /// then the weights will default to `0.0`.
+    /// 
+    /// ### Parameters
+    /// 
+    /// * `channel` - The channel, which the new weights will be assigned to.
+    /// 
+    /// * `weights` - The weights to assign. Index in the array corresponds to
+    /// the index of the convoution channel. 
+    pub fn set_weights(&mut self, channel: usize, weights: &[f64]) {
+        self.sim.set_weights(weights, channel);
     }
 
     /// Set the integration step (a.k.a. timestep) parameter `dt` of the `Lenia` instance.
@@ -344,7 +363,7 @@ impl<L: Lenia> Simulator<L> {
     /// If the specified `channel` does not exist. 
     pub fn get_frame(&self, channel: usize, display_axes: &[usize; 2], dimensions: &[usize]) -> ndarray::Array2<f64> {
         if channel >= self.sim.channels() {
-            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+            panic!("Simulator::get_frame: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
         let data_ref = self.sim.get_data_as_ref(channel);
         return data_ref.slice_each_axis(
@@ -359,7 +378,7 @@ impl<L: Lenia> Simulator<L> {
                 else {
                     return Slice {
                         start: dimensions[a.axis.index()] as isize,
-                        end: Some(dimensions[a.axis.index() + 1] as isize),
+                        end: Some((dimensions[a.axis.index()] + 1) as isize),
                         step: 1,
                     }
                 }
@@ -379,7 +398,7 @@ impl<L: Lenia> Simulator<L> {
     }
 
     /// Get the shape of the channels and convolution channels of the `Lenia` instance.
-    pub fn channel_shape(&self) -> &[usize] {
+    pub fn shape(&self) -> &[usize] {
         self.sim.shape()
     }
 
