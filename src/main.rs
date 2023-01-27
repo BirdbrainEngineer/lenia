@@ -7,14 +7,15 @@ use pixel_canvas::{Canvas, Color, input};
 const SIDE_LEN: usize = 192/2;
 const SCALE: usize = 4;
 const STEPS: usize = 5000;
+const GAIN: f64 = 5000.0;
 
 
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let inv_scale = 1.0 / SCALE as f64;
     let mut simulating = false;
+    let mut checking_transformed = false;
     let mut z_depth = SIDE_LEN/2;
-    let mut kernel_for_render: ArrayD<f64>;
     let kernel_diameter = 30;
     let mut kernel_z_depth = kernel_diameter / 2;
     let channel_shape = vec![SIDE_LEN, SIDE_LEN, SIDE_LEN];
@@ -24,18 +25,12 @@ fn main() {
     let kernel_3d = kernels::multi_gaussian_donut_nd(
         kernel_diameter, 
         3, 
-        &vec![0.0], 
+        &vec![0.5], 
         &vec![1.0], 
-        &vec![1.0/15.0]
+        &vec![1.0/6.7]
     );
     //let kernel_3d = kernels::gaussian_donut_nd(kernel_diameter, 3, 1.0/10.5);
-    let kernel_3d_clone = kernel_3d.clone();
-    let mut kernel_for_render = ndarray::ArrayD::from_elem(vec![kernel_diameter, kernel_diameter], 0.0);
-    for i in 0..kernel_diameter {
-        for j in 0..kernel_diameter {
-            kernel_for_render[[i, j]] = kernel_3d_clone[[i, j, kernel_z_depth]];
-        }
-    }
+    let kernel_3d_clone = lenia_ca::Kernel::from(kernel_3d.clone(), &channel_shape);
 
     lenia_simulator.set_kernel(kernel_3d, 0);
 
@@ -148,6 +143,7 @@ fn main() {
             '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 0.75); }
             'u' => { z_depth += 1; kernel_z_depth += 1; }
             'd' => { z_depth -= 1; kernel_z_depth -= 1; }
+            't' => { checking_transformed = !checking_transformed; }
             _ => {}
         }
         keyboardstate.character = '\0';
@@ -166,18 +162,39 @@ fn main() {
 
         let width = image.width() as usize;
         if !simulating {
-            for i in 0..kernel_diameter {
-                for j in 0..kernel_diameter {
-                    kernel_for_render[[i, j]] = kernel_3d_clone[[i, j, kernel_z_depth]];
+            if checking_transformed {
+                for (y, row) in image.chunks_mut(width).enumerate() {
+                    for (x, pixel) in row.iter_mut().enumerate() {
+                        if kernel_3d_clone.transformed.shape().len() == 2 {
+                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
+                            pixel.r = 0;//(127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1]] * 255.0) as u8;//127;
+                            pixel.b = 0;//(127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                        }
+                        else {
+                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
+                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.g = 127;
+                            //pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1, 0]] * 255.0 * GAIN) as u8;
+                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                        }
+                    }
                 }
             }
-            for (y, row) in image.chunks_mut(width).enumerate() {
-                for (x, pixel) in row.iter_mut().enumerate() {
-                    let x_index = ((x as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
-                    let y_index = ((y as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
-                    pixel.r = (kernel_for_render[[x_index, y_index]] * 255.0) as u8;
-                    pixel.g = pixel.r;
-                    pixel.b = pixel.r;
+            else {
+                for (y, row) in image.chunks_mut(width).enumerate() {
+                    for (x, pixel) in row.iter_mut().enumerate() {
+                        let x_index = ((x as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
+                        let y_index = ((y as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
+                        if kernel_3d_clone.base.shape().len() == 2 {
+                            pixel.r = (kernel_3d_clone.base[[x_index, y_index]] * 255.0) as u8;
+                        } 
+                        else {
+                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth]] * 255.0) as u8;
+                        }
+                        pixel.g = pixel.r;
+                        pixel.b = pixel.r;
+                    }
                 }
             }
         }

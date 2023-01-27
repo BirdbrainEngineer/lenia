@@ -519,6 +519,7 @@ impl fmt::Debug for ConvolutionChannel {
 pub struct Kernel {
     pub base: ndarray::ArrayD<f64>,
     pub normalized: ndarray::ArrayD<f64>,
+    pub shifted: ndarray::ArrayD<f64>,
     pub transformed: ndarray::ArrayD<Complex<f64>>,
 }
 
@@ -624,19 +625,23 @@ impl Kernel {
             );
             shifted = shifted_buffer;
         }
+        let shifted_stored = shifted.clone();
 
         // Create the discrete-fourier-transformed representation of the kernel for fft-convolving. 
         let mut scratch_space = shifted.mapv(|elem| {Complex::new(elem, 0.0)});
         let mut axes: Vec<usize> = Vec::new();
-        for (i, _) in shifted_and_fft.shape().iter().enumerate() {
+        for i in 0..shifted_and_fft.shape().len() {
             axes.push(i);
         }
-        fft::fftnd(&mut scratch_space, &mut shifted_and_fft, &axes);
+        let mut fft_instance = fft::PreplannedFFTND::preplan_by_prototype(&shifted_and_fft, false);
+        fft_instance.transform(&mut scratch_space, &mut shifted_and_fft, &axes);
+        //fft::fftnd(&mut scratch_space, &mut shifted_and_fft, &axes);
 
         // Create the kernel
         Kernel{
             base: kernel,
             normalized: normalized_kernel,
+            shifted: shifted_stored,
             transformed: shifted_and_fft,
         }
     }
