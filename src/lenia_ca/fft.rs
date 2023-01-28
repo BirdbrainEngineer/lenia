@@ -16,7 +16,7 @@ use std::{fmt, sync::Arc};
 use rustfft::{Fft, FftNum, FftPlanner, FftDirection};
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::{Zero};
-use ndarray::{Dimension, Array, Array2};
+use ndarray::{Dimension, Array, Array2, AssignElem};
 
 
 pub struct PlannedFFT {
@@ -36,14 +36,14 @@ impl fmt::Debug for PlannedFFT {
 impl PlannedFFT {
     pub fn new(length: usize, inverse: bool) -> Self {
         let mut planner = FftPlanner::new();
+        let direction: FftDirection;
+        match inverse {
+            true => { direction = FftDirection::Inverse; }
+            false => { direction = FftDirection::Forward; }
+        }
         let fft = planner.plan_fft(
             length, 
-            if inverse == true {
-                FftDirection::Inverse
-            } 
-            else {
-                FftDirection::Forward
-            }
+            direction,
         );
         let scratch_space: Vec<Complex<f64>> = Vec::from_iter(std::iter::repeat(Complex::new(0.0, 0.0)).take(fft.get_inplace_scratch_len()));
 
@@ -54,11 +54,9 @@ impl PlannedFFT {
     }
 
     pub fn inverse(&self) -> bool {
-        if self.fft.fft_direction() == rustfft::FftDirection::Forward {
-            return false;
-        }
-        else {
-            return true;
+        match self.fft.fft_direction() {
+            FftDirection::Forward => { return false; }
+            FftDirection::Inverse => { return true; }
         }
     }
 
@@ -68,6 +66,13 @@ impl PlannedFFT {
 
     pub fn transform(&mut self, data: &mut [Complex<f64>]) {
         self.fft.process_with_scratch(data, &mut self.scratch_space);
+        if self.inverse() {     // I fekin' forgot this AGAIN...
+            let inverse_len = 1.0 / data.len() as f64;
+            for v in data.iter_mut() {
+                v.re *= inverse_len;
+                v.im *= inverse_len;
+            }
+        }
     }
 }
 
@@ -78,14 +83,14 @@ pub struct PlannedFFTND {
 }
 
 impl PlannedFFTND {
-    pub fn new(shape: &Vec<usize>, inverse: bool) -> Self {
+    pub fn new(shape: &[usize], inverse: bool) -> Self {
         if shape.is_empty() { panic!("PlannedFFTND::new() - Provided shape was empty! Needs at least 1 dimension!"); }
         let base_dim = shape[0];
         for dim in shape {
             if *dim != base_dim { panic!("PlannedFFTND::new() - Dimensions not the same length. Differing dimensions not implemented."); }
         }
         PlannedFFTND {
-            shape: shape.clone(),
+            shape: shape.to_vec(),
             fft: PlannedFFT::new(base_dim, inverse),
         }
     }
@@ -100,28 +105,36 @@ impl PlannedFFTND {
 
     pub fn transform(&mut self, data: &mut ndarray::ArrayD<Complex<f64>>) {
         if data.shape() != self.shape { panic!("PlannedFFTND::transform() - shape of the data to be transformed does not agree with the shape that the fft can work on!"); }
-        let axis_iterator;
+        let mut axis_iterator: Vec<usize> = Vec::with_capacity(self.shape.len());
         if self.inverse() {
-            axis_iterator = (self.shape.len() - 1)..0;
+            for i in (0..self.shape.len()).rev() {
+                axis_iterator.push(i);
+            }
         }
         else {
-            axis_iterator = 0..self.shape.len();
+            for i in 0..self.shape.len() {
+                axis_iterator.push(i);
+            }
         }
         for axis in axis_iterator {
-            if axis == (self.shape.len() - 1) {
+            /*if axis == 0 {//(self.shape.len() - 1) {
                 for mut row in data.rows_mut() {
                     self.fft.transform(row.as_slice_mut().unwrap());
                 }
             }
-            else {
+            else {*/
                 for mut lane in data.lanes_mut(ndarray::Axis(axis)) {
                     let mut buf = lane.to_vec();
                     self.fft.transform(&mut buf);
+                    /*for element in lane.indexed_iter_mut() {
+                        element.1.re = buf[element.0].re;
+                        element.1.im = buf[element.0].im;
+                    }*/
                     for i in 0..lane.len() {
                         lane[i] = buf[i];
                     }
                 }
-            }
+            //}
         }
     }
 }

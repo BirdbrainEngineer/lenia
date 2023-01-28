@@ -4,7 +4,7 @@ use num_complex::Complex;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use super::*;
-use super::fft::PreplannedFFTND;
+use super::fft::{PreplannedFFTND, PlannedFFTND};
 
 /// `StandardLenia2D` struct implements the standard Lenia system with a 2d field and 
 /// pre-set parameters to facilitate the creation of the
@@ -202,8 +202,8 @@ pub struct ExtendedLenia {
     shape: Vec<usize>,
     buffers: Vec<ndarray::ArrayD<Complex<f64>>>,
     conv_channels: Vec<ConvolutionChannel>,
-    forward_fft_instances: Vec<fft::PreplannedFFTND>,
-    inverse_fft_instances: Vec<fft::PreplannedFFTND>,
+    forward_fft_instances: Vec<fft::PlannedFFTND>,
+    inverse_fft_instances: Vec<fft::PlannedFFTND>,
 }
 
 impl ExtendedLenia {
@@ -248,8 +248,8 @@ impl Lenia for ExtendedLenia {
         }
         
         ExtendedLenia{
-            forward_fft_instances: vec![fft::PreplannedFFTND::preplan_by_prototype(&channel.field, false)],
-            inverse_fft_instances: vec![fft::PreplannedFFTND::preplan_by_prototype(&channel.field, true)],
+            forward_fft_instances: vec![fft::PlannedFFTND::new(&channel_shape, false)],
+            inverse_fft_instances: vec![fft::PlannedFFTND::new(&channel_shape, true)],
             dt: 0.1,
             channels: vec![channel],
             shape: channel_shape,
@@ -276,8 +276,8 @@ impl Lenia for ExtendedLenia {
         let mut channel_rwlocks: Vec<Arc<RwLock<Channel>>> = Vec::with_capacity(self.channels.len());
         let mut convolution_mutexes: Vec<Arc<Mutex<ConvolutionChannel>>> = Vec::with_capacity(self.conv_channels.len());
         let mut buffer_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<Complex<f64>>>>> = Vec::with_capacity(self.buffers.len());
-        let mut forward_fft_mutexes: Vec<Arc<Mutex<PreplannedFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
-        let mut inverse_fft_mutexes: Vec<Arc<Mutex<PreplannedFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
+        let mut forward_fft_mutexes: Vec<Arc<Mutex<PlannedFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
+        let mut inverse_fft_mutexes: Vec<Arc<Mutex<PlannedFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
 
         for _ in 0..self.channels.len() {
             channel_rwlocks.push(Arc::new(RwLock::new(self.channels.remove(0))));
@@ -314,14 +314,14 @@ impl Lenia for ExtendedLenia {
                 let mut forward_fft = forward_fft_lock.lock().unwrap();
                 let mut inverse_fft = inverse_fft_lock.lock().unwrap();
                 // Get data from source channel
-                convolution_channel.input_buffer.zip_mut_with(&input.field, 
+                buffer.zip_mut_with(&input.field, 
                     |a, b| {
                         a.re = b.re;
                         a.im = 0.0;
                     }
                 );
                 // Forward fft the input data
-                forward_fft.transform(&mut convolution_channel.input_buffer, &mut buffer, &axes_clone);
+                forward_fft.transform(&mut buffer);
                 // Fourier-transform convolute
                 buffer.zip_mut_with(&convolution_channel.kernel.transformed, 
                     |a, b| {    // Complex multiplication without cloning
@@ -331,7 +331,14 @@ impl Lenia for ExtendedLenia {
                     }
                 );
                 // Inverse fft to get convolution result
-                inverse_fft.transform(&mut buffer, &mut convolution_channel.field, &inverse_axes_clone);
+                inverse_fft.transform(&mut buffer);
+
+                convolution_channel.field.zip_mut_with(&buffer, 
+                    |a, b| {
+                        a.re = b.re;
+                        a.im = 0.0;
+                    }
+                );
                 // Apply growth function
                 let growth_func = (convolution_channel.growth, &convolution_channel.growth_params.clone());
                 convolution_channel.field.map_inplace(|a| {
@@ -390,6 +397,13 @@ impl Lenia for ExtendedLenia {
             }));
         }
 
+        for _ in 0..forward_fft_mutexes.len() {
+            self.forward_fft_instances.push(Arc::try_unwrap(forward_fft_mutexes.remove(0)).unwrap().into_inner().unwrap());
+        }
+        for _ in 0..inverse_fft_mutexes.len() {
+            self.inverse_fft_instances.push(Arc::try_unwrap(inverse_fft_mutexes.remove(0)).unwrap().into_inner().unwrap());
+        }
+
         for handle in summing_handles {
             handle.join().unwrap();
         }
@@ -402,12 +416,7 @@ impl Lenia for ExtendedLenia {
         for _ in 0..buffer_mutexes.len() {
             self.buffers.push(Arc::try_unwrap(buffer_mutexes.remove(0)).unwrap().into_inner().unwrap());
         }
-        for _ in 0..forward_fft_mutexes.len() {
-            self.forward_fft_instances.push(Arc::try_unwrap(forward_fft_mutexes.remove(0)).unwrap().into_inner().unwrap());
-        }
-        for _ in 0..inverse_fft_mutexes.len() {
-            self.inverse_fft_instances.push(Arc::try_unwrap(inverse_fft_mutexes.remove(0)).unwrap().into_inner().unwrap());
-        }
+        
     }
 
     fn set_channels(&mut self, num_channels: usize) {
@@ -476,8 +485,8 @@ impl Lenia for ExtendedLenia {
                         growth_params: vec![0.0],
                     }
                 );
-                self.forward_fft_instances.push(fft::PreplannedFFTND::preplan_by_prototype(&self.conv_channels[i].field, false));
-                self.inverse_fft_instances.push(fft::PreplannedFFTND::preplan_by_prototype(&self.conv_channels[i].field, true));
+                self.forward_fft_instances.push(fft::PlannedFFTND::new(&self.shape, false));
+                self.inverse_fft_instances.push(fft::PlannedFFTND::new(&self.shape, true));
             }
             for channel in &mut self.channels {
                 for _ in channel.weights.len()..num_conv_channels {

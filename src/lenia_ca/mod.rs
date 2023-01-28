@@ -628,14 +628,10 @@ impl Kernel {
         let shifted_stored = shifted.clone();
 
         // Create the discrete-fourier-transformed representation of the kernel for fft-convolving. 
-        let mut scratch_space = shifted.mapv(|elem| {Complex::new(elem, 0.0)});
-        let mut axes: Vec<usize> = Vec::new();
-        for i in 0..shifted_and_fft.shape().len() {
-            axes.push(i);
-        }
-        let mut fft_instance = fft::PreplannedFFTND::preplan_by_prototype(&shifted_and_fft, false);
-        fft_instance.transform(&mut scratch_space, &mut shifted_and_fft, &axes);
-        //fft::fftnd(&mut scratch_space, &mut shifted_and_fft, &axes);
+        let mut shifted_and_fft = shifted.mapv(|elem| {Complex::new(elem, 0.0)});
+
+        let mut fft_instance = fft::PlannedFFTND::new(&channel_shape, false);
+        fft_instance.transform(&mut shifted_and_fft);
 
         // Create the kernel
         Kernel{
