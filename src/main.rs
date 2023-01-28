@@ -14,17 +14,18 @@ fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let inv_scale = 1.0 / SCALE as f64;
     let mut simulating = false;
+    let mut checking_kernel = true;
     let mut checking_transformed = false;
     let mut z_depth = SIDE_LEN/2;
     let kernel_diameter = 30;
     let mut kernel_z_depth = kernel_diameter / 2;
-    let channel_shape = vec![SIDE_LEN, SIDE_LEN, SIDE_LEN];
+    let channel_shape = vec![SIDE_LEN, SIDE_LEN];
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExtendedLenia>::new(&channel_shape);
     lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.15, 0.07], 0);
     let kernel_3d = kernels::multi_gaussian_donut_nd(
         kernel_diameter, 
-        3, 
+        2, 
         &vec![0.5], 
         &vec![1.0], 
         &vec![1.0/6.7]
@@ -137,8 +138,8 @@ fn main() {
                     2
                 );*/
             }
-            's' => { simulating = true; }
-            'k' => { simulating = false; }
+            's' => { simulating = !simulating; }
+            'k' => { checking_kernel = !checking_kernel; }
             '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.5); }
             '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 0.75); }
             'u' => { z_depth += 1; kernel_z_depth += 1; }
@@ -156,20 +157,16 @@ fn main() {
         //let g_frame = lenia_simulator.get_data_as_f64(1);
         //let b_frame = lenia_simulator.get_data_as_f64(2);
 
-        let r_frame = lenia_simulator.get_frame(0, &[0, 1], &[0, 0, z_depth]);
-        //let g_frame = lenia_simulator.get_frame(1, &[0, 1], &[0, 0]);
-        //let b_frame = lenia_simulator.get_frame(2, &[0, 1], &[0, 0]);
-
         let width = image.width() as usize;
-        if !simulating {
+        if checking_kernel {
             if checking_transformed {
                 for (y, row) in image.chunks_mut(width).enumerate() {
                     for (x, pixel) in row.iter_mut().enumerate() {
                         if kernel_3d_clone.transformed.shape().len() == 2 {
                             let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
-                            pixel.r = 0;//(127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                            pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1]] * 255.0) as u8;//127;
-                            pixel.b = 0;//(127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.g = 127;//(kernel_3d_clone.shifted[[coords.0, coords.1]] * 255.0) as u8;
+                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
                         }
                         else {
                             let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
@@ -199,6 +196,10 @@ fn main() {
             }
         }
         else {
+            let r_frame = lenia_simulator.get_frame(0, &[0, 1], &[0, 0, z_depth]);
+            //let g_frame = lenia_simulator.get_frame(1, &[0, 1], &[0, 0]);
+            //let b_frame = lenia_simulator.get_frame(2, &[0, 1], &[0, 0]);
+
             for (y, row) in image.chunks_mut(width).enumerate() {
                 for (x, pixel) in row.iter_mut().enumerate() {
                     let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
@@ -215,7 +216,9 @@ fn main() {
                     //pixel.b = (b_frame[[coords.0, coords.1]] * 255.0) as u8;
                 }
             }
-            lenia_simulator.iterate();
+            if simulating {
+                lenia_simulator.iterate();
+            }
         }
     });
 

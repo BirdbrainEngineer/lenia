@@ -19,6 +19,95 @@ use rustfft::num_traits::{Zero};
 use ndarray::{Dimension, Array, Array2};
 
 
+pub struct PlannedFFT {
+    fft: Arc<dyn Fft<f64>>,
+    scratch_space: Vec<Complex<f64>>,
+}
+
+impl fmt::Debug for PlannedFFT {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreplannedFFT")
+         .field("scratch_space", &format!("Vec<Complex<f64>>, len: {}", self.scratch_space.len()))
+         .field("fft", &format!("Arc<dyn rustfft::Fft<f64>> => len: {}, direction: {}", self.fft.len(), self.fft.fft_direction()))
+         .finish()
+    }
+}
+
+impl PlannedFFT {
+    pub fn new(length: usize, inverse: bool) -> Self {
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft(
+            length, 
+            if inverse == true {
+                FftDirection::Inverse
+            } 
+            else {
+                FftDirection::Forward
+            }
+        );
+        let scratch_space: Vec<Complex<f64>> = Vec::from_iter(std::iter::repeat(Complex::new(0.0, 0.0)).take(fft.get_inplace_scratch_len()));
+
+        PlannedFFT {
+            fft: fft,
+            scratch_space: scratch_space,
+        }
+    }
+
+    pub fn inverse(&self) -> bool {
+        if self.fft.fft_direction() == rustfft::FftDirection::Forward {
+            return false;
+        }
+        else {
+            return true;
+        }
+    }
+
+    pub fn length(&self) -> usize {
+        self.fft.len()
+    }
+
+    pub fn transform(&mut self, data: &mut [Complex<f64>]) {
+        self.fft.process_with_scratch(data, &mut self.scratch_space);
+    }
+}
+
+#[derive(Debug)]
+pub struct PlannedFFTND {
+    shape: Vec<usize>,
+    fft: PlannedFFT,
+}
+
+impl PlannedFFTND {
+    pub fn new(shape: &Vec<usize>, inverse: bool) -> Self {
+        if shape.is_empty() { panic!("PlannedFFTND::new() - Provided shape was empty! Needs at least 1 dimension!"); }
+        let base_dim = shape[0];
+        for dim in shape {
+            if *dim != base_dim { panic!("PlannedFFTND::new() - Dimensions not the same length. Differing dimensions not implemented."); }
+        }
+        PlannedFFTND {
+            shape: shape.clone(),
+            fft: PlannedFFT::new(base_dim, inverse),
+        }
+    }
+
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    pub fn inverse(&self) -> bool {
+        self.fft.inverse()
+    }
+
+    pub fn transform(&mut self, data: &mut ndarray::ArrayD<Complex<f64>>) {
+        if data.shape() != self.shape { panic!("PlannedFFTND::transform() - shape of the data to be transformed does not agree with the shape that the fft can work on!"); }
+
+        
+    }
+}
+
+
+
+
 /// `PreplannedFFT` struct is a container for all the relevant data for a determined length
 /// 1D Fast-Fourier-Transform. 
 pub struct PreplannedFFT{
