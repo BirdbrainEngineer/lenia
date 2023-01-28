@@ -100,8 +100,29 @@ impl PlannedFFTND {
 
     pub fn transform(&mut self, data: &mut ndarray::ArrayD<Complex<f64>>) {
         if data.shape() != self.shape { panic!("PlannedFFTND::transform() - shape of the data to be transformed does not agree with the shape that the fft can work on!"); }
-
-        
+        let axis_iterator;
+        if self.inverse() {
+            axis_iterator = (self.shape.len() - 1)..0;
+        }
+        else {
+            axis_iterator = 0..self.shape.len();
+        }
+        for axis in axis_iterator {
+            if axis == (self.shape.len() - 1) {
+                for mut row in data.rows_mut() {
+                    self.fft.transform(row.as_slice_mut().unwrap());
+                }
+            }
+            else {
+                for mut lane in data.lanes_mut(ndarray::Axis(axis)) {
+                    let mut buf = lane.to_vec();
+                    self.fft.transform(&mut buf);
+                    for i in 0..lane.len() {
+                        lane[i] = buf[i];
+                    }
+                }
+            }
+        }
     }
 }
 
