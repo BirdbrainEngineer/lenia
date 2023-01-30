@@ -29,7 +29,7 @@ pub fn sample_normal(x: f64, mu: f64, stddev: f64) -> f64 {
     (-(((x - mu) * (x - mu))/(2.0 * (stddev * stddev)))).exp()
 }
 
-pub fn store_frame_as_png(frame: &ndarray::ArrayD<Complex<f64>>, frame_number: usize, folder_path: &str, bit_depth: png::BitDepth) {
+pub fn store_frame_as_png(frame: &ndarray::ArrayD<f64>, frame_number: usize, folder_path: &str) {
     if frame.shape().is_empty() { panic!("lenia_ca::store_frame() - Can not store an empty frame!") }
 
     let path_base = format!("{}{}{}",
@@ -47,11 +47,11 @@ pub fn store_frame_as_png(frame: &ndarray::ArrayD<Complex<f64>>, frame_number: u
 
     std::thread::spawn(move || {
         let mut indexes: Vec<usize> = vec![0; data.shape().len()];
-        nested_png_export(path_base, &data, &mut indexes, 0, bit_depth);
+        nested_png_export(path_base, &data, &mut indexes, 0);
     });
 }
 
-fn nested_png_export(path: String, data: &ndarray::ArrayD<Complex<f64>>, indexes: &mut Vec<usize>, current_axis: usize, bits: png::BitDepth) {
+fn nested_png_export(path: String, data: &ndarray::ArrayD<f64>, indexes: &mut Vec<usize>, current_axis: usize) {
     if current_axis == (indexes.len() - 2) {
         let file_path = format!("{}.png", &path);
         println!("{}", &file_path);
@@ -85,7 +85,7 @@ fn nested_png_export(path: String, data: &ndarray::ArrayD<Complex<f64>>, indexes
         )
         .to_shape(((data.shape()[data.shape().len() - 2] * data.shape()[data.shape().len() - 1]), Order::ColumnMajor))
         .unwrap()
-        .mapv(|el| { (el.re * 255.0) as u8 });
+        .mapv(|el| { (el * 255.0) as u8 });
         writer.write_image_data(image_data.as_slice().unwrap());
     }
     else {
@@ -95,8 +95,7 @@ fn nested_png_export(path: String, data: &ndarray::ArrayD<Complex<f64>>, indexes
                 format!("{}_{}", &path, i), 
                 data,
                 indexes,
-                current_axis + 1,
-                bits,
+                current_axis + 1
             );
         }
     }
@@ -311,16 +310,15 @@ impl<L: Lenia> Simulator<L> {
         if channel >= self.sim.channels() {
             panic!("Simulator::fill_channel: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
-        let channel_data = self.sim.get_data_as_mut_ref(channel);
+        let channel_data = self.sim.get_channel_as_mut_ref(channel);
         channel_data.zip_mut_with(data, 
             |a, b| {
-                a.re = *b;
-                a.im = 0.0;
+                *a = *b;
             }
         );
     }
 
-    /// Retrieve an owned copy ("deep-copy") of the specified channel's data.
+    /// Retrieve an owned copy (clone) of the specified channel's data.
     /// 
     /// ### Arguments
     /// 
@@ -328,7 +326,7 @@ impl<L: Lenia> Simulator<L> {
     /// 
     /// ### Returns
     /// 
-    /// An array (`ndarray::ArrayD`) of the real components of the channel's data.
+    /// Clone of the specified channel's data.
     /// 
     /// ### Panics
     /// 
@@ -337,56 +335,24 @@ impl<L: Lenia> Simulator<L> {
         if channel >= self.sim.channels() {
             panic!("Simulator::get_channel_data_as_f64: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
-        let out = self.sim.get_data_as_ref(channel).map(
-            |a| {
-                a.re
-            }
-        );
-        out
+        self.sim.get_channel_as_ref(channel).clone()
     }
 
-    /// Retrieve a referenced copy ("shallow-copy") of the specified channel's data. Use this if
+    /// Retrieve a referenced to the specified channel's data. Use this if
     /// you want to prevent the creation of a separate owned array. 
-    /// 
-    /// This is faster than `get_data_as_f64` as it
-    /// does not create an array of values, but rather gives the reference to the data
-    /// directly. The downside is that the data is of the form that `Lenia` internals work on, 
-    /// which is `Complex<f64>`. 
-    /// 
-    /// ### Panics
-    /// 
-    /// If the specified `channel` does not exist. 
-    pub fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
-        if channel >= self.sim.channels() {
-            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
-        }
-        self.sim.get_data_as_ref(channel)
-    }
-
-    /// Retrieve the real components of a channel's data as mutable references. This allows for
-    /// modification of the channel's current data directly. 
     /// 
     /// ### Arguments
     /// 
-    /// * `channel` - Index of the channel from which the mutable references are to be taken.
-    /// 
-    /// ### Returns
-    /// 
-    /// An n-dimensional array (`ndarray::ArrayD`) of references to the channel's data's real components.
+    /// * `channel` - Index of the channel to get a reference from.
     /// 
     /// ### Panics
     /// 
     /// If the specified `channel` does not exist. 
-    pub fn get_data_as_mut_f64_ref(&mut self, channel: usize) -> ndarray::ArrayD<&mut f64> {
+    pub fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
         if channel >= self.sim.channels() {
             panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
-        let out = self.sim.get_data_as_mut_ref(channel).map_mut(
-            |a| {
-                &mut a.re
-            }
-        );
-        out
+        self.sim.get_channel_as_ref(channel)
     }
 
     /// Retrieve a mutable reference to the specified channel's data. This allows for modification
@@ -408,11 +374,11 @@ impl<L: Lenia> Simulator<L> {
     /// ### Panics
     /// 
     /// If the specified `channel` does not exist. 
-    pub fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>> {
+    pub fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
         if channel >= self.sim.channels() {
             panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
-        self.sim.get_data_as_mut_ref(channel)
+        self.sim.get_channel_as_mut_ref(channel)
     }
 
     /// Receives a 2d array (`ndarray::Array2`) of `f64` values of a 2d slice of a channel's data. 
@@ -439,7 +405,7 @@ impl<L: Lenia> Simulator<L> {
         if channel >= self.sim.channels() {
             panic!("Simulator::get_frame: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
-        let data_ref = self.sim.get_data_as_ref(channel);
+        let data_ref = self.sim.get_channel_as_ref(channel);
         return data_ref.slice_each_axis(
             |a|{
                 if a.axis.index() == display_axes[0] || a.axis.index() == display_axes[1] {
@@ -463,7 +429,7 @@ impl<L: Lenia> Simulator<L> {
                 data_ref.shape()[display_axes[1]]
             ), Order::RowMajor)
         ).unwrap()
-        .mapv(|el| { el.re })
+        .mapv(|el| { el })
     }
 
     /// Get the current integration step (a.k.a. timestep) parameter `dt` of the `Lenia` instance.
@@ -528,10 +494,11 @@ pub trait Lenia {
     fn set_weights(&mut self, new_weights: &[f64], channel: usize);
     /// Sets the dt parameter of the `Lenia` instance. 
     fn set_dt(&mut self, new_dt: f64);
-    /// Returns a reference ("shallow-copy") to a channel's current data. 
-    fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>>;
-    /// Returns a mutable reference ("shallow copy") to a channel's current data.
-    fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>>;
+    /// Returns a reference to a channel's current data. 
+    fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64>;
+    /// Returns a mutable reference to a channel's current data.
+    fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64>;
+    /// Returns a reference to 
     /// Returns the shape of the channels and convolution channels (as reference). 
     fn shape(&self) -> &[usize];
     /// Returns the current `dt` parameter of the `Lenia` instance.
@@ -554,7 +521,6 @@ pub trait Lenia {
 /// Lenia system more complex than the Standard Lenia. 
 pub struct Channel {
     pub field: ndarray::ArrayD<f64>,
-    pub deltas: ndarray::ArrayD<f64>,
     pub weights: Vec<f64>,
     pub weight_sum_reciprocal: f64,
 }
@@ -566,7 +532,7 @@ pub struct Channel {
 /// growth function.
 pub struct ConvolutionChannel {
     pub input_channel: usize,
-    pub field: ndarray::ArrayD<Complex<f64>>,
+    pub field: ndarray::ArrayD<f64>,
     pub kernel: Kernel,
     pub growth: fn(f64, &[f64]) -> f64,
     pub growth_params: Vec<f64>,

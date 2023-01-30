@@ -14,20 +14,21 @@ use super::fft::PlannedFFTND;
 /// 
 /// Changeable parameters include the timestep a.k.a. integration step **dt**, 
 /// the **growth function**, and the **kernel** given that the kernel is 2-dimensional. 
-pub struct StandardLenia2D {
+pub struct StandardLenia {
     dt: f64,
     channel: Channel,
     shape: Vec<usize>,
     conv_channel: ConvolutionChannel,
+    convolved: ndarray::ArrayD<Complex<f64>>,
     forward_fft_instance: fft::PlannedFFTND,
     inverse_fft_instance: fft::PlannedFFTND,
 }
 
-impl StandardLenia2D {
+impl StandardLenia {
     const DEFAULT_KERNEL_SIZE: usize = 28;
 }
 
-impl Lenia for StandardLenia2D {
+impl Lenia for StandardLenia {
     /// Create and initialize a new instance of "Standard Lenia" in 2D. This version of Lenia
     /// can have only a single channel and a single convolution channel. It also does not
     /// support any weights, as it can be encoded within the `dt` parameter. 
@@ -52,11 +53,11 @@ impl Lenia for StandardLenia2D {
     /// * If either of the axis lengths in `shape` are `<28`.
     fn new(shape: &[usize]) -> Self {
         if shape.len() < 2 || shape.len() > 2 { 
-            panic!("StandardLenia2D(new): Expected 2 dimensions for 2D Standard Lenia! Found {}.", shape.len()); 
+            panic!("StandardLenia2D(new): Expected 2 dimensions for Standard Lenia! Found {}.", shape.len()); 
         }
         for (i, dim) in shape.iter().enumerate() {
             if *dim < Self::DEFAULT_KERNEL_SIZE {
-                panic!("StandardLenia2D(new): Axis {} is extremely small ({} pixels). Minimum size of each axis for 2D Standard Lenia is {} pixels.", i, *dim, Self::DEFAULT_KERNEL_SIZE);
+                panic!("StandardLenia::new() - Axis {} is extremely small ({} pixels). Minimum size of each axis for 2D Standard Lenia is {} pixels.", i, *dim, Self::DEFAULT_KERNEL_SIZE);
             }
         }
         let kernel = Kernel::from(
@@ -70,38 +71,40 @@ impl Lenia for StandardLenia2D {
         let conv_channel = ConvolutionChannel {
             input_channel: 0,
             kernel: kernel,
-            field: ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0)),
+            field: ndarray::ArrayD::from_elem(shape, 0.0),
             growth: growth_functions::standard_lenia,
             growth_params: vec![0.15, 0.017],
         };
 
         let channel = Channel {
-            field: ndarray::ArrayD::zeros(shape),
-            deltas: ndarray::ArrayD::zeros(shape),
+            field: ndarray::ArrayD::from_elem(shape, 0.0),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
         };
         
-        StandardLenia2D{
+        StandardLenia{
             forward_fft_instance: fft::PlannedFFTND::new(shape, false),
             inverse_fft_instance: fft::PlannedFFTND::new(shape, true),
             dt: 0.1,
             channel: channel,
             shape: shape.to_vec(),
             conv_channel: conv_channel,
+            convolved: ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0)),
         }
     }
 
     fn iterate(&mut self) {
-        self.conv_channel.field.zip_mut_with(&self.channel.field, 
+        self.convolved.zip_mut_with(
+            &self.channel.field, 
             |a, b| {
                 a.re = *b;
                 a.im = 0.0;
             }
         );
-        self.forward_fft_instance.transform(&mut self.conv_channel.field);
+        self.forward_fft_instance.transform(&mut self.convolved);
         
-        self.conv_channel.field.zip_mut_with(&self.conv_channel.kernel.transformed, 
+        self.convolved.zip_mut_with(
+            &self.conv_channel.kernel.transformed, 
             |a, b| {
                 // Complex multiplication without cloning
                 let real = (a.re * b.re) - (a.im * b.im);
@@ -109,30 +112,33 @@ impl Lenia for StandardLenia2D {
                 a.re = real;
             }
         );
-        self.inverse_fft_instance.transform(&mut self.conv_channel.field);
 
-        self.channel.deltas.zip_mut_with(&self.conv_channel.field, 
+        self.inverse_fft_instance.transform(&mut self.convolved);
+
+        self.conv_channel.field.zip_mut_with(
+            &self.convolved, 
             |a, b| {
-                a.re = (a.re + ((self.conv_channel.growth)(b.re, &self.conv_channel.growth_params) * self.dt)).clamp(0.0, 1.0);
+                *a = (self.conv_channel.growth)(b.re, &self.conv_channel.growth_params);
             }
         );
-        self.channel.field.zip_mut_with(&self.channel.deltas, |a, b| { *a = (*a + *b).clamp(0.0, 1.0); })
+
+        self.channel.field.zip_mut_with(&self.conv_channel.field, |a, b| { *a = ((*a + *b) * self.dt).clamp(0.0, 1.0); })
     }
 
     fn set_channels(&mut self, num_channels: usize) {
-        println!("Changing the number of channels is not available for Standard Lenia! Try using Extended Lenia instead.");
+        println!("Changing the number of channels is not available for Standard Lenia! Try using a different Lenia instead.");
     }
 
     fn set_conv_channels(&mut self, num_conv_channels: usize) {
-        println!("Changing the number of channels is not available for Standard Lenia! Try using Extended Lenia instead.");
+        println!("Changing the number of channels is not available for Standard Lenia! Try using a different Lenia instead.");
     }
 
     fn set_source_channel(&mut self, conv_channel: usize, src_channel: usize) {
-        println!("Adding or changing source channels is not available for Standard Lenia! Try using Extended Lenia instead.");
+        println!("Adding or changing source channels is not available for Standard Lenia! Try using a different Lenia instead.");
     }
 
     fn set_weights(&mut self, new_weights: &[f64], conv_channel: usize) {
-        println!("Adding or changing convolution output weights is not available for Standard Lenia! Try usingh Extended Lenia instead.");
+        println!("Adding or changing convolution output weights is not available for Standard Lenia! Try using a different Lenia instead.");
     }
 
     fn set_kernel(&mut self, kernel: ndarray::ArrayD<f64>, conv_channel: usize) {
@@ -152,11 +158,11 @@ impl Lenia for StandardLenia2D {
         &self.shape
     }
 
-    fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
+    fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
         &self.channel.field
     }
 
-    fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>> {
+    fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
         &mut self.channel.field
     }
 
@@ -185,9 +191,10 @@ impl Lenia for StandardLenia2D {
 pub struct ExtendedLenia {
     dt: f64,
     channels: Vec<Channel>,
+    deltas: Vec<ndarray::ArrayD<f64>>,
     shape: Vec<usize>,
-    buffers: Vec<ndarray::ArrayD<Complex<f64>>>,
     conv_channels: Vec<ConvolutionChannel>,
+    convolutions: Vec<ndarray::ArrayD<Complex<f64>>>,
     forward_fft_instances: Vec<fft::PlannedFFTND>,
     inverse_fft_instances: Vec<fft::PlannedFFTND>,
 }
@@ -212,17 +219,17 @@ impl Lenia for ExtendedLenia {
             ), 
             shape
         );
-        let conv_field = ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0));
+        
         let conv_channel = ConvolutionChannel {
             input_channel: 0,
             kernel: kernel,
-            field: conv_field,
+            field: ndarray::ArrayD::from_elem(shape, 0.0),
             growth: growth_functions::standard_lenia,
             growth_params: vec![0.15, 0.017],
         };
 
         let channel = Channel {
-            field: conv_channel.field.clone(),
+            field: ndarray::ArrayD::from_elem(shape, 0.0),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
         };
@@ -237,9 +244,10 @@ impl Lenia for ExtendedLenia {
             inverse_fft_instances: vec![fft::PlannedFFTND::new(&channel_shape, true)],
             dt: 0.1,
             channels: vec![channel],
-            shape: channel_shape,
-            buffers: vec![conv_channel.field.clone()],
+            deltas: vec![ndarray::ArrayD::from_elem(shape, 0.0)],
             conv_channels: vec![conv_channel],
+            convolutions: vec![ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0))],
+            shape: shape.to_vec(),
         }
     }
 
@@ -259,57 +267,57 @@ impl Lenia for ExtendedLenia {
         //Create mutexes and rwlocks
         let mut sources: Vec<usize> = Vec::with_capacity(self.conv_channels.len());
         let mut channel_rwlocks: Vec<Arc<RwLock<Channel>>> = Vec::with_capacity(self.channels.len());
-        let mut convolution_mutexes: Vec<Arc<Mutex<ConvolutionChannel>>> = Vec::with_capacity(self.conv_channels.len());
-        let mut buffer_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<Complex<f64>>>>> = Vec::with_capacity(self.buffers.len());
+        let mut delta_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<f64>>>> = Vec::with_capacity(self.deltas.len());
+        let mut conv_channel_mutexes: Vec<Arc<Mutex<ConvolutionChannel>>> = Vec::with_capacity(self.conv_channels.len());
+        let mut convolution_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<Complex<f64>>>>> = Vec::with_capacity(self.convolutions.len());
         let mut forward_fft_mutexes: Vec<Arc<Mutex<PlannedFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
         let mut inverse_fft_mutexes: Vec<Arc<Mutex<PlannedFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
 
         for _ in 0..self.channels.len() {
             channel_rwlocks.push(Arc::new(RwLock::new(self.channels.remove(0))));
+            delta_mutexes.push(Arc::new(Mutex::new(self.deltas.remove(0))));
         }
         for _ in 0..self.conv_channels.len() {
             sources.push(self.conv_channels[0].input_channel);
-            convolution_mutexes.push(Arc::new(Mutex::new(self.conv_channels.remove(0))));
-        }
-        for _ in 0..self.buffers.len() {
-            buffer_mutexes.push(Arc::new(Mutex::new(self.buffers.remove(0))));
-        }
-        for _ in 0..self.forward_fft_instances.len() {
+            conv_channel_mutexes.push(Arc::new(Mutex::new(self.conv_channels.remove(0))));
+            convolution_mutexes.push(Arc::new(Mutex::new(self.convolutions.remove(0))));
             forward_fft_mutexes.push(Arc::new(Mutex::new(self.forward_fft_instances.remove(0))));
             inverse_fft_mutexes.push(Arc::new(Mutex::new(self.inverse_fft_instances.remove(0))));
         }
 
         // Concurrent convolutions
-        let mut convolution_handles = Vec::with_capacity(convolution_mutexes.len());
+        let mut convolution_handles = Vec::with_capacity(conv_channel_mutexes.len());
 
-        for i in 0..convolution_mutexes.len() {
+        for i in 0..conv_channel_mutexes.len() {
             // Set up and aquire locks on data
             let axes_clone = axes.clone();
             let inverse_axes_clone = inverse_axes.clone();
             let source_lock = Arc::clone(&channel_rwlocks[sources[i]]);
-            let buffer_lock = Arc::clone(&buffer_mutexes[i]);
-            let convolution_channel_lock = Arc::clone(&convolution_mutexes[i]);
+            let convolution_lock = Arc::clone(&convolution_mutexes[i]);
+            let convolution_channel_lock = Arc::clone(&conv_channel_mutexes[i]);
             let forward_fft_lock = Arc::clone(&forward_fft_mutexes[i]);
             let inverse_fft_lock = Arc::clone(&inverse_fft_mutexes[i]);
 
             convolution_handles.push(thread::spawn(move || {
                 let mut convolution_channel = convolution_channel_lock.lock().unwrap();
                 let input = source_lock.read().unwrap();
-                let mut buffer = buffer_lock.lock().unwrap();
+                let mut convolution = convolution_lock.lock().unwrap();
                 let mut forward_fft = forward_fft_lock.lock().unwrap();
                 let mut inverse_fft = inverse_fft_lock.lock().unwrap();
                 // Get data from source channel
-                buffer.zip_mut_with(&input.field, 
+                convolution.zip_mut_with(
+                    &input.field, 
                     |a, b| {
-                        a.re = b.re;
+                        a.re = *b;
                         a.im = 0.0;
                     }
                 );
                 // Fourier-transform convolute
                 // Forward fft the input data
-                forward_fft.transform(&mut buffer);
+                forward_fft.transform(&mut convolution);
                 // Complex multiplication without cloning
-                buffer.zip_mut_with(&convolution_channel.kernel.transformed, 
+                convolution.zip_mut_with(
+                    &convolution_channel.kernel.transformed, 
                     |a, b| {
                         let real = (a.re * b.re) - (a.im * b.im);
                         a.im = ((a.re + a.im) * (b.re + b.im)) - real;
@@ -317,20 +325,15 @@ impl Lenia for ExtendedLenia {
                     }
                 );
                 // Inverse fft to get convolution result
-                inverse_fft.transform(&mut buffer);
-
-                convolution_channel.field.zip_mut_with(&buffer, 
+                inverse_fft.transform(&mut convolution);
+                // Apply growth function
+                let growth_info = (convolution_channel.growth, convolution_channel.growth_params.clone());
+                convolution_channel.field.zip_mut_with(
+                    &convolution, 
                     |a, b| {
-                        a.re = b.re;
-                        a.im = 0.0;
+                        *a = (growth_info.0)(b.re, &growth_info.1);
                     }
                 );
-                // Apply growth function
-                let growth_func = (convolution_channel.growth, &convolution_channel.growth_params.clone());
-                convolution_channel.field.map_inplace(|a| {
-                    a.re = (growth_func.0)(a.re, &growth_func.1);
-                    a.im = 0.0;
-                });
             }));
         }
 
@@ -341,9 +344,9 @@ impl Lenia for ExtendedLenia {
         }
 
         // Collapse convolution channel mutexes back into a single owned vector
-        let mut convolution_channels: Vec<ConvolutionChannel> = Vec::with_capacity(convolution_mutexes.len());
-        for i in 0..convolution_mutexes.len() {
-            let data = convolution_mutexes.remove(0);
+        let mut convolution_channels: Vec<ConvolutionChannel> = Vec::with_capacity(conv_channel_mutexes.len());
+        for i in 0..conv_channel_mutexes.len() {
+            let data = conv_channel_mutexes.remove(0);
             convolution_channels.push(Arc::try_unwrap(data).unwrap().into_inner().unwrap());
         }
 
@@ -354,40 +357,38 @@ impl Lenia for ExtendedLenia {
         for i in 0..channel_rwlocks.len() {
             let dt = self.dt.clone();
             let channel_lock = Arc::clone(&channel_rwlocks[i]);
-            let buffer_lock = Arc::clone(&buffer_mutexes[i]);
+            let delta_lock = Arc::clone(&delta_mutexes[i]);
             let convoluted_results_lock = Arc::clone(&convoluted_results_rwlock);
             
             // Thread code
             summing_handles.push(thread::spawn(move || {
                 let mut channel = channel_lock.write().unwrap();
-                let mut buffer = buffer_lock.lock().unwrap();
+                let mut deltas = delta_lock.lock().unwrap();
                 let convoluted_results = convoluted_results_lock.read().unwrap();
 
-                // Add together all of the weighted results from convolutions
+                // Apply weighted sums and dt to get the delta to be added to channel
                 for i in 0..channel.weights.len() {
-                    buffer.zip_mut_with(&convoluted_results[i].field, 
+                    deltas.zip_mut_with(&convoluted_results[i].field, 
                         |a, b| {
-                            if i == 0 { a.re = 0.0; }
-                            a.re += b.re * channel.weights[i];
+                            if i == 0 { *a = 0.0; }
+                            *a += *b * channel.weights[i];
+                            if i == channel.weights.len() { *a *= channel.weight_sum_reciprocal; }
                         }
                     );
                 }
-                // Apply weighted average and dt, store result in channel
-                let weighted_average_reciprocal = channel.weight_sum_reciprocal;
-                channel.field.zip_mut_with(&buffer, 
+                // Add delta to channel and clamp
+                channel.field.zip_mut_with(&mut deltas, 
                     |a, b| {
-                        a.re = (a.re + (b.re * weighted_average_reciprocal * dt)).clamp(0.0, 1.0);
-                        a.im = 0.0;
+                        *a = (*a + (*b * dt)).clamp(0.0, 1.0);
                     }
                 );
             }));
         }
 
-        for _ in 0..forward_fft_mutexes.len() {
+        for _ in 0..convolution_mutexes.len() {
             self.forward_fft_instances.push(Arc::try_unwrap(forward_fft_mutexes.remove(0)).unwrap().into_inner().unwrap());
-        }
-        for _ in 0..inverse_fft_mutexes.len() {
             self.inverse_fft_instances.push(Arc::try_unwrap(inverse_fft_mutexes.remove(0)).unwrap().into_inner().unwrap());
+            self.convolutions.push(Arc::try_unwrap(convolution_mutexes.remove(0)).unwrap().into_inner().unwrap());
         }
 
         for handle in summing_handles {
@@ -396,11 +397,10 @@ impl Lenia for ExtendedLenia {
 
         // Return ownership of all data back to Lenia instance
         self.conv_channels = Arc::try_unwrap(convoluted_results_rwlock).unwrap().into_inner().unwrap();
+
         for _ in 0..channel_rwlocks.len() {
             self.channels.push(Arc::try_unwrap(channel_rwlocks.remove(0)).unwrap().into_inner().unwrap());
-        }
-        for _ in 0..buffer_mutexes.len() {
-            self.buffers.push(Arc::try_unwrap(buffer_mutexes.remove(0)).unwrap().into_inner().unwrap());
+            self.deltas.push(Arc::try_unwrap(delta_mutexes.remove(0)).unwrap().into_inner().unwrap());
         }
         
     }
@@ -409,29 +409,20 @@ impl Lenia for ExtendedLenia {
         if num_channels <= self.channels.len() {
             for i in (num_channels..self.channels.len()).rev() {
                 self.channels.remove(i);
-                if i >= self.conv_channels.len() {
-                    self.buffers.remove(i);
-                }
+                self.deltas.remove(i);
             }
         }
         else {
-            if num_channels > self.buffers.len() {
-                for _ in self.buffers.len()..num_channels {
-                    self.buffers.push(self.buffers[0].clone());
-                }
-            }
-            let mut weights_prototype: Vec<f64> = Vec::new();
-            for _ in &self.channels[0].weights {
-                weights_prototype.push(0.0);
-            }
+            let weights_prototype: Vec<f64> = vec![0.0; self.conv_channels.len()];
             for _ in self.channels.len()..num_channels {
                 self.channels.push(
                     Channel { 
-                        field: ndarray::ArrayD::from_elem(self.shape.clone(), Complex{re: 0.0, im: 0.0}),
+                        field: ndarray::ArrayD::from_elem(self.shape.clone(), 0.0),
                         weights: weights_prototype.clone(),
                         weight_sum_reciprocal: 0.0,
                     }
                 );
+                self.deltas.push(ndarray::ArrayD::from_elem(self.shape.clone(), 0.0));
             }
         }
     }
@@ -442,9 +433,7 @@ impl Lenia for ExtendedLenia {
                 self.conv_channels.remove(i);
                 self.forward_fft_instances.remove(i);
                 self.inverse_fft_instances.remove(i);
-                if i >= self.channels.len() {
-                    self.buffers.remove(i);
-                }
+                self.convolutions.remove(i);
             }
             for channel in &mut self.channels {
                 for i in (num_conv_channels..channel.weights.len()).rev() {
@@ -455,11 +444,6 @@ impl Lenia for ExtendedLenia {
             }
         }
         else {
-            if num_conv_channels > self.buffers.len() {
-                for _ in self.buffers.len()..num_conv_channels {
-                    self.buffers.push(self.buffers[0].clone());
-                }
-            }
             for i in self.conv_channels.len()..num_conv_channels {
                 self.conv_channels.push(
                     ConvolutionChannel { 
@@ -472,13 +456,12 @@ impl Lenia for ExtendedLenia {
                 );
                 self.forward_fft_instances.push(fft::PlannedFFTND::new(&self.shape, false));
                 self.inverse_fft_instances.push(fft::PlannedFFTND::new(&self.shape, true));
+                self.convolutions.push(ndarray::ArrayD::from_elem(self.shape.clone(), Complex::new(0.0, 0.0)));
             }
             for channel in &mut self.channels {
                 for _ in channel.weights.len()..num_conv_channels {
                     channel.weights.push(0.0);
                 }
-                let sum: f64 = channel.weights.iter().sum();
-                channel.weight_sum_reciprocal = 1.0 / sum;
             }
         }
     }
@@ -523,11 +506,11 @@ impl Lenia for ExtendedLenia {
         &self.shape
     } 
 
-    fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
+    fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
         &self.channels[channel].field
     } 
 
-    fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<Complex<f64>> {
+    fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
         &mut self.channels[channel].field
     } 
 
