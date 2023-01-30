@@ -4,7 +4,9 @@ use ndarray::{ArrayD};
 use lenia_ca::{growth_functions, kernels, lenias::*};
 use pixel_canvas::{Canvas, Color, input};
 
-const SIDE_LEN: usize = 192/2;
+const X_SIDE_LEN: usize = 88;
+const Y_SIDE_LEN: usize = 88;//X_SIDE_LEN/2;
+const Z_SIDE_LEN: usize = 88;//X_SIDE_LEN/3;
 const SCALE: usize = 4;
 const STEPS: usize = 5000;
 const GAIN: f64 = 5000.0;
@@ -16,13 +18,13 @@ fn main() {
     let mut simulating = false;
     let mut checking_kernel = true;
     let mut checking_transformed = false;
-    let mut z_depth = SIDE_LEN/2;
-    let kernel_diameter = 30;
+    let mut z_depth = Z_SIDE_LEN/2;
+    let kernel_diameter = 26;
     let mut kernel_z_depth = kernel_diameter / 2;
-    let channel_shape = vec![SIDE_LEN, SIDE_LEN];
+    let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExtendedLenia>::new(&channel_shape);
-    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.15, 0.07], 0);
+    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.15, 0.017], 0);
     let kernel_3d = kernels::multi_gaussian_donut_nd(
         kernel_diameter, 
         2, 
@@ -35,20 +37,21 @@ fn main() {
 
     lenia_simulator.set_kernel(kernel_3d, 0);
 
-    // Test extended lenia 1 - creates an evolving blob, that eventually evolves into a glider
-    //lenia_simulator.set_channels(2);
-    //lenia_simulator.set_convolution_channels(2);
-    //lenia_simulator.set_convolution_channel_source(1, 1);
-    //lenia_simulator.set_weights(0, &[0.55, 0.45]);
-    //lenia_simulator.set_weights(1, &[0.3, 0.7]);
-    //lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.185, 0.025], 1);
-    //let second_conv_kernel = kernels::multi_gaussian_donut_2d(
+    // //Test extended lenia 1 - creates an evolving blob, that eventually evolves into a sporadic glider
+    // // 2d channel shape
+    // lenia_simulator.set_channels(2);
+    // lenia_simulator.set_convolution_channels(2);
+    // lenia_simulator.set_convolution_channel_source(1, 1);
+    // lenia_simulator.set_weights(0, &[0.55, 0.45]);
+    // lenia_simulator.set_weights(1, &[0.3, 0.7]);
+    // lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.185, 0.025], 1);
+    // let second_conv_kernel = kernels::multi_gaussian_donut_2d(
     //    kernel_diameter, 
     //    &vec![0.25, 0.75], 
     //    &vec![0.97, 0.45], 
     //    &vec![0.15, 0.2]
-    //);
-    //lenia_simulator.set_kernel(second_conv_kernel, 1);
+    // );
+    // lenia_simulator.set_kernel(second_conv_kernel, 1);
 
     /* 
     // Extended lenia test 2
@@ -98,7 +101,7 @@ fn main() {
     }*/
 
     
-    let canvas = Canvas::new(SIDE_LEN * SCALE, SIDE_LEN * SCALE)
+    let canvas = Canvas::new(X_SIDE_LEN * SCALE, Y_SIDE_LEN * SCALE)
         .title("Lenia")
         .state(keyboardhandler::KeyboardState::new())
         .input(keyboardhandler::KeyboardState::handle_input);
@@ -142,9 +145,15 @@ fn main() {
             'k' => { checking_kernel = !checking_kernel; }
             '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.5); }
             '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 0.75); }
-            'u' => { z_depth += 1; kernel_z_depth += 1; }
-            'd' => { z_depth -= 1; kernel_z_depth -= 1; }
+            'u' => { if z_depth != (Z_SIDE_LEN-1) { z_depth += 1 }; if kernel_z_depth != (kernel_diameter-1) { kernel_z_depth += 1 }; }
+            'd' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; }
             't' => { checking_transformed = !checking_transformed; }
+            'c' => { lenia_ca::store_frame_as_png(
+                lenia_simulator.get_data_as_ref(0), 
+                0, 
+                &r"./output", 
+                png::BitDepth::Sixteen); 
+            }
             _ => {}
         }
         keyboardstate.character = '\0';
@@ -181,8 +190,8 @@ fn main() {
             else {
                 for (y, row) in image.chunks_mut(width).enumerate() {
                     for (x, pixel) in row.iter_mut().enumerate() {
-                        let x_index = ((x as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
-                        let y_index = ((y as f64 / (SCALE * SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
+                        let x_index = ((x as f64 / (SCALE * X_SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
+                        let y_index = ((y as f64 / (SCALE * Y_SIDE_LEN) as f64) * kernel_diameter as f64) as usize;
                         if kernel_3d_clone.base.shape().len() == 2 {
                             pixel.r = (kernel_3d_clone.base[[x_index, y_index]] * 255.0) as u8;
                         } 
@@ -206,10 +215,10 @@ fn main() {
                     unsafe {
                         pixel.r = (r_frame.uget([coords.0, coords.1]) * 255.0) as u8;
                         pixel.g = pixel.r;
-                        pixel.b = pixel.r;
+                        //pixel.b = pixel.r;
                         //pixel.g = (g_frame.uget([coords.0, coords.1]) * 255.0) as u8;
                         //pixel.b = (b_frame.uget([coords.0, coords.1]).re * 255.0) as u8;
-                        //pixel.b = ((pixel.r as u32 + pixel.g as u32) / 2) as u8;
+                        pixel.b = ((pixel.r as u32 + pixel.g as u32) / 2) as u8;
                     }
                     //pixel.r = (r_frame[[coords.0, coords.1]] * 255.0) as u8;
                     //pixel.g = (g_frame[[coords.0, coords.1]] * 255.0) as u8;

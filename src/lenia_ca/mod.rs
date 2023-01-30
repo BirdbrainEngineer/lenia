@@ -3,8 +3,9 @@
 #[cfg(target_has_atomic = "ptr")]
 
 use std::fmt;
-use ndarray::{self, Axis, Slice, Order};
+use ndarray::{self, Axis, Slice, Order, IxDyn};
 use num_complex::Complex;
+use png;
 mod fft;
 pub mod lenias;
 pub mod kernels;
@@ -24,8 +25,81 @@ pub mod seeders;
 /// 
 /// ### Returns
 /// `f64` value of the defined gaussian distribution evaluated at x. 
-fn sample_normal(x: f64, mu: f64, stddev: f64) -> f64 {
+pub fn sample_normal(x: f64, mu: f64, stddev: f64) -> f64 {
     (-(((x - mu) * (x - mu))/(2.0 * (stddev * stddev)))).exp()
+}
+
+pub fn store_frame_as_png(frame: &ndarray::ArrayD<Complex<f64>>, frame_number: usize, folder_path: &str, bit_depth: png::BitDepth) {
+    if frame.shape().is_empty() { panic!("lenia_ca::store_frame() - Can not store an empty frame!") }
+
+    let path_base = format!("{}{}{}",
+        if folder_path.is_empty() { &"./" } else { folder_path.clone() }, 
+        if folder_path.chars().last().unwrap() != '/' && folder_path.chars().last().unwrap() != '\\' { &"/" } else { &"" },
+        frame_number
+    );
+    let data;
+    if frame.shape().len() == 1 {
+        data = frame.to_shape((ndarray::IxDyn(&[frame.shape()[0], 1]), Order::RowMajor)).unwrap().mapv(|el| { el.clone() } );
+    }
+    else {
+        data = frame.clone();
+    }
+
+    std::thread::spawn(move || {
+        let mut indexes: Vec<usize> = vec![0; data.shape().len()];
+        nested_png_export(path_base, &data, &mut indexes, 0, bit_depth);
+    });
+}
+
+fn nested_png_export(path: String, data: &ndarray::ArrayD<Complex<f64>>, indexes: &mut Vec<usize>, current_axis: usize, bits: png::BitDepth) {
+    if current_axis == (indexes.len() - 2) {
+        let file_path = format!("{}.png", &path);
+        println!("{}", &file_path);
+        let file = std::fs::File::create(file_path).unwrap();
+        let buf_writer = std::io::BufWriter::new(file);
+        let mut encoder = png::Encoder::new(
+            buf_writer, 
+            data.shape()[data.shape().len()-2] as u32, 
+            data.shape()[data.shape().len()-1] as u32
+        );
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let image_data = data.slice_each_axis(
+            |a|{
+                if a.axis.index() == (indexes.len() - 2) || a.axis.index() == (indexes.len() - 1) {
+                    return Slice {
+                        start: 0,
+                        end: None,
+                        step: 1,
+                    }
+                }
+                else {
+                    return Slice {
+                        start: indexes[a.axis.index()] as isize,
+                        end: Some((indexes[a.axis.index()] + 1) as isize),
+                        step: 1,
+                    }
+                }
+            }
+        )
+        .to_shape(((data.shape()[data.shape().len() - 2] * data.shape()[data.shape().len() - 1]), Order::ColumnMajor))
+        .unwrap()
+        .mapv(|el| { (el.re * 255.0) as u8 });
+        writer.write_image_data(image_data.as_slice().unwrap());
+    }
+    else {
+        for i in 0..data.shape()[current_axis] {
+            indexes[current_axis] = i;
+            nested_png_export(
+                format!("{}_{}", &path, i), 
+                data,
+                indexes,
+                current_axis + 1,
+                bits,
+            );
+        }
+    }
 }
 
 /// Container type for a `Lenia` implementation. Also contains the conversions to- and from 
@@ -479,7 +553,8 @@ pub trait Lenia {
 /// weights of the convolution channels and summing up the final result in any
 /// Lenia system more complex than the Standard Lenia. 
 pub struct Channel {
-    pub field: ndarray::ArrayD<Complex<f64>>,
+    pub field: ndarray::ArrayD<f64>,
+    pub deltas: ndarray::ArrayD<f64>,
     pub weights: Vec<f64>,
     pub weight_sum_reciprocal: f64,
 }
@@ -491,7 +566,6 @@ pub struct Channel {
 /// growth function.
 pub struct ConvolutionChannel {
     pub input_channel: usize,
-    pub input_buffer: ndarray::ArrayD<Complex<f64>>,
     pub field: ndarray::ArrayD<Complex<f64>>,
     pub kernel: Kernel,
     pub growth: fn(f64, &[f64]) -> f64,
@@ -502,7 +576,6 @@ impl fmt::Debug for ConvolutionChannel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConvolutionChannel")
          .field("input_channel", &self.input_channel)
-         .field("input_buffer", &self.input_buffer)
          .field("field", &self.field)
          .field("kernel", &self.kernel)
          .field("growth", &"fn(f64, &[f64]) -> f64")
@@ -549,7 +622,7 @@ impl Kernel {
     /// * If any of the corresponding axis lengths in `kernel` are greater than in `channel_shape`.
     pub fn from(kernel: ndarray::ArrayD<f64>, channel_shape: &[usize]) -> Self {
         let mut normalized_kernel = kernel.clone();
-        let mut shifted_and_fft = ndarray::ArrayD::from_elem(channel_shape, Complex::new(0.0, 0.0));
+        let shifted_and_fft = ndarray::ArrayD::from_elem(channel_shape, Complex::new(0.0, 0.0));
         
         // Check for coherence in dimensionality and that the kernel is not
         // larger than the channel it is used to convolve with.

@@ -1,12 +1,11 @@
-use glium::buffer;
 use ndarray;
 use num_complex::Complex;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use super::*;
-use super::fft::{PreplannedFFTND, PlannedFFTND};
+use super::fft::PlannedFFTND;
 
-/// `StandardLenia2D` struct implements the standard Lenia system with a 2d field and 
+/// `SimpleLenia` struct implements the non-extended Lenia system with a 2d field and 
 /// pre-set parameters to facilitate the creation of the
 /// ***Orbium unicaudatus*** glider - hallmark of the Lenia system.
 /// 
@@ -19,10 +18,9 @@ pub struct StandardLenia2D {
     dt: f64,
     channel: Channel,
     shape: Vec<usize>,
-    convolution_buffer: ndarray::ArrayD<Complex<f64>>,
     conv_channel: ConvolutionChannel,
-    forward_fft_instance: fft::PreplannedFFTND,
-    inverse_fft_instance: fft::PreplannedFFTND,
+    forward_fft_instance: fft::PlannedFFTND,
+    inverse_fft_instance: fft::PlannedFFTND,
 }
 
 impl StandardLenia2D {
@@ -68,51 +66,42 @@ impl Lenia for StandardLenia2D {
             ), 
             shape
         );
-        let conv_field = ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0));
+
         let conv_channel = ConvolutionChannel {
             input_channel: 0,
-            input_buffer: conv_field.clone(),
             kernel: kernel,
-            field: conv_field,
+            field: ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0)),
             growth: growth_functions::standard_lenia,
             growth_params: vec![0.15, 0.017],
         };
 
         let channel = Channel {
-            field: conv_channel.field.clone(),
+            field: ndarray::ArrayD::zeros(shape),
+            deltas: ndarray::ArrayD::zeros(shape),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
         };
-
-        let mut channel_shape = Vec::new();
-        for dim in shape {
-            channel_shape.push(*dim);
-        }
         
         StandardLenia2D{
-            forward_fft_instance: fft::PreplannedFFTND::preplan_by_prototype(&channel.field, false),
-            inverse_fft_instance: fft::PreplannedFFTND::preplan_by_prototype(&channel.field, true),
+            forward_fft_instance: fft::PlannedFFTND::new(shape, false),
+            inverse_fft_instance: fft::PlannedFFTND::new(shape, true),
             dt: 0.1,
             channel: channel,
-            shape: channel_shape,
-            convolution_buffer: conv_channel.field.clone(),
+            shape: shape.to_vec(),
             conv_channel: conv_channel,
         }
     }
 
     fn iterate(&mut self) {
-        self.conv_channel.input_buffer.zip_mut_with(&self.channel.field, 
+        self.conv_channel.field.zip_mut_with(&self.channel.field, 
             |a, b| {
-                a.re = b.re;
+                a.re = *b;
                 a.im = 0.0;
             }
         );
-        self.forward_fft_instance.transform(
-            &mut self.conv_channel.input_buffer, 
-            &mut self.convolution_buffer, 
-            &[0, 1]
-        );
-        self.convolution_buffer.zip_mut_with(&self.conv_channel.kernel.transformed, 
+        self.forward_fft_instance.transform(&mut self.conv_channel.field);
+        
+        self.conv_channel.field.zip_mut_with(&self.conv_channel.kernel.transformed, 
             |a, b| {
                 // Complex multiplication without cloning
                 let real = (a.re * b.re) - (a.im * b.im);
@@ -120,17 +109,14 @@ impl Lenia for StandardLenia2D {
                 a.re = real;
             }
         );
-        self.inverse_fft_instance.transform(
-            &mut self.convolution_buffer, 
-            &mut self.conv_channel.field, 
-            &[1, 0]
-        );
-        self.channel.field.zip_mut_with(&self.conv_channel.field, 
+        self.inverse_fft_instance.transform(&mut self.conv_channel.field);
+
+        self.channel.deltas.zip_mut_with(&self.conv_channel.field, 
             |a, b| {
                 a.re = (a.re + ((self.conv_channel.growth)(b.re, &self.conv_channel.growth_params) * self.dt)).clamp(0.0, 1.0);
-                a.im = 0.0;
             }
         );
+        self.channel.field.zip_mut_with(&self.channel.deltas, |a, b| { *a = (*a + *b).clamp(0.0, 1.0); })
     }
 
     fn set_channels(&mut self, num_channels: usize) {
@@ -229,7 +215,6 @@ impl Lenia for ExtendedLenia {
         let conv_field = ndarray::ArrayD::from_elem(shape, Complex::new(0.0, 0.0));
         let conv_channel = ConvolutionChannel {
             input_channel: 0,
-            input_buffer: conv_field.clone(),
             kernel: kernel,
             field: conv_field,
             growth: growth_functions::standard_lenia,
@@ -320,11 +305,12 @@ impl Lenia for ExtendedLenia {
                         a.im = 0.0;
                     }
                 );
+                // Fourier-transform convolute
                 // Forward fft the input data
                 forward_fft.transform(&mut buffer);
-                // Fourier-transform convolute
+                // Complex multiplication without cloning
                 buffer.zip_mut_with(&convolution_channel.kernel.transformed, 
-                    |a, b| {    // Complex multiplication without cloning
+                    |a, b| {
                         let real = (a.re * b.re) - (a.im * b.im);
                         a.im = ((a.re + a.im) * (b.re + b.im)) - real;
                         a.re = real;
@@ -478,7 +464,6 @@ impl Lenia for ExtendedLenia {
                 self.conv_channels.push(
                     ConvolutionChannel { 
                         input_channel: 0, 
-                        input_buffer: self.buffers[0].clone(), 
                         field: self.conv_channels[0].field.clone(), 
                         kernel: Kernel::from(kernels::empty(&self.shape), &self.shape), 
                         growth: growth_functions::pass, 
