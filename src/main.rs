@@ -149,7 +149,7 @@ fn main() {
             'd' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; }
             't' => { checking_transformed = !checking_transformed; }
             'c' => { lenia_ca::store_frame_as_png(
-                lenia_simulator.get_data_as_ref(0), 
+                lenia_simulator.get_channel_as_ref(0), 
                 0, 
                 &r"./output"); 
             }

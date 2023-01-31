@@ -166,6 +166,18 @@ impl Lenia for StandardLenia {
         &mut self.channel.field
     }
 
+    fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
+        &self.convolved
+    }
+
+    fn get_grown_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<f64> {
+        &self.conv_channel.field
+    }
+
+    fn get_deltas_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
+        &self.conv_channel.field    // Same as growth result because weights are not available for Standard Lenia
+    }
+
     fn dt(&self) -> f64 {
         self.dt
     }
@@ -512,7 +524,19 @@ impl Lenia for ExtendedLenia {
 
     fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
         &mut self.channels[channel].field
-    } 
+    }
+
+    fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
+        &self.convolutions[conv_channel]
+    }
+
+    fn get_grown_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<f64> {
+        &self.conv_channels[conv_channel].field
+    }
+
+    fn get_deltas_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
+        &self.deltas[channel]
+    }
 
     fn dt(&self) -> f64 {
         self.dt

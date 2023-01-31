@@ -318,28 +318,7 @@ impl<L: Lenia> Simulator<L> {
         );
     }
 
-    /// Retrieve an owned copy (clone) of the specified channel's data.
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `channel` - Index of the channel to copy data from.
-    /// 
-    /// ### Returns
-    /// 
-    /// Clone of the specified channel's data.
-    /// 
-    /// ### Panics
-    /// 
-    /// If the specified `channel` does not exist. 
-    pub fn get_data_as_f64(&self, channel: usize) -> ndarray::ArrayD<f64> {
-        if channel >= self.sim.channels() {
-            panic!("Simulator::get_channel_data_as_f64: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
-        }
-        self.sim.get_channel_as_ref(channel).clone()
-    }
-
-    /// Retrieve a referenced to the specified channel's data. Use this if
-    /// you want to prevent the creation of a separate owned array. 
+    /// Retrieve a referenced to the specified channel's data. 
     /// 
     /// ### Arguments
     /// 
@@ -348,7 +327,7 @@ impl<L: Lenia> Simulator<L> {
     /// ### Panics
     /// 
     /// If the specified `channel` does not exist. 
-    pub fn get_data_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
+    pub fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
         if channel >= self.sim.channels() {
             panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
@@ -358,27 +337,73 @@ impl<L: Lenia> Simulator<L> {
     /// Retrieve a mutable reference to the specified channel's data. This allows for modification
     /// of the channel's data directly. 
     /// 
-    /// This is faster than `get_data_as_mut_f64_ref` as it
-    /// does not create an array of references, but rather gives the mutable reference to the data
-    /// directly. The downside is that the data is of the form that `Lenia` internals work on, 
-    /// which is `Complex<f64>`. 
-    /// 
     /// ### Arguments
     /// 
     /// * `channel` - Index of the channel from which the mutable reference to data is to be taken.
     /// 
-    /// ### Returns
+    /// ### Panics
     /// 
-    /// Mutable reference to the specified channel's data.
+    /// If the specified `channel` does not exist. 
+    pub fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
+        if channel >= self.sim.channels() {
+            panic!("Simulator::get_channel_data_as_ref() - Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+        }
+        self.sim.get_channel_as_mut_ref(channel)
+    }
+    
+    /// Retrieve a reference to the specified channel's "deltas". Deltas are the amounts added onto the 
+    /// previous iteration's result to get the current iteration's result. 
+    /// 
+    /// Note that `dt` parameter has not been applied for this field, and the values are in the range
+    /// `[-1.0..1.0]`.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `channel` - Index of the channel from which the reference to data is to be taken.
     /// 
     /// ### Panics
     /// 
     /// If the specified `channel` does not exist. 
-    pub fn get_data_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
+    pub fn get_deltas_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
         if channel >= self.sim.channels() {
-            panic!("Simulator::get_channel_data_as_ref: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
+            panic!("Simulator::get_deltas_as_ref() - Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
-        self.sim.get_channel_as_mut_ref(channel)
+        self.sim.get_deltas_as_ref(channel)
+    }
+
+    /// Retrieve a reference to the specified convolution channel's convolution result. 
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `convolution_channel` - Index of the convolution channel from which to
+    /// produce the `f64` `ndarray`. 
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist.
+    pub fn get_convoluted(&self, convolution_channel: usize) -> ndarray::ArrayD<f64> {
+        if convolution_channel >= self.sim.channels() {
+            panic!("Simulator::get_convoluted() - Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
+        }
+        self.sim.get_convoluted_as_ref(convolution_channel).map(|a| { a.re })
+    }
+
+    /// Retrieve a reference to the specified convolution channel's convolution results with
+    /// the groth function applied.
+    /// 
+    /// ### Arguments
+    /// 
+    /// * `convolution_channel` - Index of the convolution channel from which the
+    /// reference to data is to be taken.
+    /// 
+    /// ### Panics
+    /// 
+    /// If the specified `channel` does not exist.
+    pub fn get_grown_as_ref(&self, convolution_channel: usize) -> &ndarray::ArrayD<f64> {
+        if convolution_channel >= self.sim.channels() {
+            panic!("Simulator::get_grown_as_ref() - Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
+        }
+        self.sim.get_grown_as_ref(convolution_channel)
     }
 
     /// Receives a 2d array (`ndarray::Array2`) of `f64` values of a 2d slice of a channel's data. 
@@ -392,11 +417,6 @@ impl<L: Lenia> Simulator<L> {
     /// 
     /// * `dimensions` - Which indexes in any other axes the 2d slice is taken from. 
     /// The entries for axes selected in `display_axes` can be any number, and will be disregarded. 
-    /// 
-    /// ### Returns
-    /// 
-    /// 2d array (`ndarray::Array2`) filled with `f64` values where the dimension lengths are 
-    /// the same as the axis lengths of the axes chosen with `display axes`.
     /// 
     /// ### Panics
     /// 
@@ -498,7 +518,12 @@ pub trait Lenia {
     fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64>;
     /// Returns a mutable reference to a channel's current data.
     fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64>;
-    /// Returns a reference to 
+    /// Returns a reference to the convolution result.
+    fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>>;
+    /// Returns a reference to the field with growth function applied.
+    fn get_grown_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<f64>;
+    /// Returns a reference to the results to be added to previous channel state. Lacks `dt` scaling.
+    fn get_deltas_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64>;
     /// Returns the shape of the channels and convolution channels (as reference). 
     fn shape(&self) -> &[usize];
     /// Returns the current `dt` parameter of the `Lenia` instance.
