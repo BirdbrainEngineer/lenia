@@ -4,10 +4,10 @@ use ndarray::{ArrayD};
 use lenia_ca::{growth_functions, kernels, lenias::*};
 use pixel_canvas::{Canvas, Color, input};
 
-const X_SIDE_LEN: usize = 120;
-const Y_SIDE_LEN: usize = 100;//X_SIDE_LEN/2;
+const X_SIDE_LEN: usize = 400;
+const Y_SIDE_LEN: usize = 300;//X_SIDE_LEN/2;
 const Z_SIDE_LEN: usize = 88;//X_SIDE_LEN/3;
-const SCALE: usize = 4;
+const SCALE: usize = 2;
 const STEPS: usize = 5000;
 const GAIN: f64 = 5000.0;
 
@@ -23,7 +23,7 @@ fn main() {
     let mut kernel_z_depth = kernel_diameter / 2;
     let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
 
-    let mut lenia_simulator = lenia_ca::Simulator::<ExtendedLenia>::new(&channel_shape);
+    let mut lenia_simulator = lenia_ca::Simulator::<StandardLenia>::new(&channel_shape);
     lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.15, 0.0177], 0);
     let kernel_3d = kernels::multi_gaussian_donut_nd(
         kernel_diameter, 
@@ -141,6 +141,7 @@ fn main() {
                     2
                 );*/
             }
+            'n' => { lenia_simulator.iterate(); }
             's' => { simulating = !simulating; }
             'k' => { checking_kernel = !checking_kernel; }
             '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.5); }

@@ -1,13 +1,15 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::{Arc, Mutex}};
 use rustfft::{Fft, FftNum, FftPlanner, FftDirection};
+use std::collections::VecDeque;
 use rustfft::num_complex::Complex;
-use rustfft::num_traits::{Zero};
-use ndarray::{Dimension, Array, Array2, AssignElem};
+use rustfft::num_traits::{Zero, Float};
+use ndarray::{Dimension, Array, Array2, AssignElem, IntoNdProducer};
 
 
+#[derive(Clone)]
 pub struct PlannedFFT {
     fft: Arc<dyn Fft<f64>>,
     scratch_space: Vec<Complex<f64>>,
@@ -24,6 +26,7 @@ impl fmt::Debug for PlannedFFT {
 
 impl PlannedFFT {
     pub fn new(length: usize, inverse: bool) -> Self {
+        if length == 0 { panic!("PlannedFFT::new() - Provided length was 0. Length must be at least 1!"); }
         let mut planner = FftPlanner::new();
         let direction: FftDirection;
         match inverse {
@@ -117,6 +120,110 @@ impl PlannedFFTND {
                 self.fft_instances[axis].transform(&mut buf);
                 for i in 0..lane.len() {
                     lane[i] = buf[i];
+                }
+            }
+        }
+    }
+}
+
+
+
+#[derive(Debug)]
+pub struct PlannedParFFTND {
+    shape: Vec<usize>,
+    fft_instances: Vec<Vec<Arc<Mutex<PlannedFFT>>>>,
+    inverse: bool,
+    threads: usize,
+}
+
+impl PlannedParFFTND {
+    pub fn new(shape: &[usize], inverse: bool, concurrent_ffts: usize) -> Self {
+        if shape.is_empty() { panic!("PlannedParFFTND::new() - Provided shape was empty! Needs at least 1 dimension!"); }
+        let mut threads = (std::thread::available_parallelism().unwrap().get() as f64 / concurrent_ffts as f64).ceil() as usize;
+        if threads == 0 { threads = 1; }
+        for dim in shape {
+            if threads > *dim { 
+                threads = *dim;
+             }
+        }
+        let mut ffts: Vec<Vec<Arc<Mutex<PlannedFFT>>>> = Vec::with_capacity(shape.len());
+        for i in 0..shape.len() {
+            let fft_prototype = PlannedFFT::new(shape[i], inverse);
+            ffts.push(Vec::with_capacity(threads));
+            for _ in 0..threads {
+                ffts[i].push(Arc::new(Mutex::new(fft_prototype.clone())));
+            }
+        }
+        PlannedParFFTND {
+            shape: shape.to_vec(),
+            fft_instances: ffts,
+            inverse: inverse,
+            threads: threads,
+        }
+    }
+
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    pub fn inverse(&self) -> bool {
+        self.inverse
+    }
+
+    pub fn threads(&self) -> usize {
+        self.threads
+    }
+
+    pub fn transform(&mut self, data: &mut ndarray::ArrayD<Complex<f64>>) {
+        if data.shape() != self.shape { panic!("PlannedFFTND::transform() - shape of the data to be transformed does not agree with the shape that the fft can work on!"); }
+        let mut axis_iterator: Vec<usize> = Vec::with_capacity(self.shape.len());
+        if self.inverse() {
+            for i in (0..self.shape.len()).rev() {
+                axis_iterator.push(i);
+            }
+        }
+        else {
+            for i in 0..self.shape.len() {
+                axis_iterator.push(i);
+            }
+        }
+        for axis in axis_iterator {
+            let mut fft_handles = VecDeque::with_capacity(self.threads);
+            let mut buffers: VecDeque<Vec<Complex<f64>>> = VecDeque::new();
+            for lane in data.lanes(ndarray::Axis(axis)) {
+                buffers.push_back(lane.to_vec());
+            }
+            let num_lanes = buffers.len();
+            
+            for i in 0..self.threads {
+                let fft_lock = Arc::clone(&self.fft_instances[axis][i]);
+                let buffer = buffers.pop_front().unwrap();
+                fft_handles.push_back(std::thread::spawn(move || {
+                    let mut fft = fft_lock.lock().unwrap();
+                    let mut buf = buffer; //buffer_lock.lock().unwrap();
+                    fft.transform(&mut buf);
+                    buf
+                }));
+            }
+            let mut lanes = data.lanes_mut(ndarray::Axis(axis)).into_iter();
+
+            for lane_index in 0..num_lanes {
+                let mut lane = lanes.next().unwrap();
+                let result = fft_handles.pop_front().unwrap().join().unwrap();
+                for i in 0..lane.len() {
+                    lane[i].re = result[i].re;
+                    lane[i].im = result[i].im;
+                }
+                let thread_index = lane_index + self.threads;
+                if thread_index < num_lanes {
+                    let fft_lock = Arc::clone(&self.fft_instances[axis][thread_index % self.threads]);
+                    let buffer = buffers.pop_front().unwrap();
+                    fft_handles.push_back(std::thread::spawn(move || {
+                        let mut fft = fft_lock.lock().unwrap();
+                        let mut buf = buffer; //buffer_lock.lock().unwrap();
+                        fft.transform(&mut buf);
+                        buf
+                    }));   
                 }
             }
         }

@@ -20,8 +20,8 @@ pub struct StandardLenia {
     shape: Vec<usize>,
     conv_channel: ConvolutionChannel,
     convolved: ndarray::ArrayD<Complex<f64>>,
-    forward_fft_instance: fft::PlannedFFTND,
-    inverse_fft_instance: fft::PlannedFFTND,
+    forward_fft_instance: fft::PlannedParFFTND,
+    inverse_fft_instance: fft::PlannedParFFTND,
 }
 
 impl StandardLenia {
@@ -83,8 +83,8 @@ impl Lenia for StandardLenia {
         };
         
         StandardLenia{
-            forward_fft_instance: fft::PlannedFFTND::new(shape, false),
-            inverse_fft_instance: fft::PlannedFFTND::new(shape, true),
+            forward_fft_instance: fft::PlannedParFFTND::new(shape, false, 1),
+            inverse_fft_instance: fft::PlannedParFFTND::new(shape, true, 1),
             dt: 0.1,
             channel: channel,
             shape: shape.to_vec(),
@@ -122,7 +122,7 @@ impl Lenia for StandardLenia {
             }
         );
 
-        self.channel.field.zip_mut_with(&self.conv_channel.field, |a, b| { *a = ((*a + *b) * self.dt).clamp(0.0, 1.0); })
+        self.channel.field.zip_mut_with(&self.conv_channel.field, |a, b| { *a = (*a + (*b * self.dt)).clamp(0.0, 1.0); })
     }
 
     fn set_channels(&mut self, num_channels: usize) {
