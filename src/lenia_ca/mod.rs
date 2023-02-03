@@ -13,19 +13,6 @@ pub mod kernels;
 pub mod growth_functions;
 pub mod seeders;
 
-/// Samples the normal distribution where the peak (at `x = mu`) is 1.
-/// This is not suitable for use as a gaussian probability density function!
-/// 
-/// ### Arguments
-/// 
-/// * `x` - Point of the normal distribution to sample.
-/// 
-/// * `mu` - The mean (point of the highest value/peak) of the normal distribution.
-/// 
-/// * `stddev` - Standard deviation of the normal distribution. 
-/// 
-/// ### Returns
-/// `f64` value of the defined gaussian distribution evaluated at x. 
 
 trait SetBytes {
     fn set_low(&mut self, value: u8);
@@ -43,6 +30,36 @@ impl SetBytes for u16 {
     }
 }
 
+trait GetBytes {
+    fn get_low(&self) -> u8;
+    fn get_high(&self) -> u8;
+}
+
+impl GetBytes for u16 {
+    fn get_low(&self) -> u8 {
+        (*self & 0xff) as u8
+    }
+    fn get_high(&self) -> u8 {
+        ((*self & 0xff00) >> 8) as u8
+    }
+}
+
+#[derive(PartialEq, PartialOrd, Copy, Clone)]
+pub enum BitDepth {
+    Eight,
+    Sixteen,
+}
+
+/// Samples the normal distribution where the peak (at `x = mu`) is 1.
+/// This is not suitable for use as a gaussian probability density function!
+/// 
+/// ### Arguments
+/// 
+/// * `x` - Point of the normal distribution to sample.
+/// 
+/// * `mu` - The mean (point of the highest value/peak) of the normal distribution.
+/// 
+/// * `stddev` - Standard deviation of the normal distribution. 
 pub fn sample_normal(x: f64, mu: f64, stddev: f64) -> f64 {
     (-(((x - mu) * (x - mu))/(2.0 * (stddev * stddev)))).exp()
 }
@@ -93,7 +110,7 @@ pub fn load_from_png(file_path: &str) -> ndarray::ArrayD<f64> {
     output
 }
 
-pub fn export_frame_as_png(frame: &ndarray::ArrayD<f64>, prefix: &str, folder_path: &str) {
+pub fn export_frame_as_png(bit_depth: BitDepth, frame: &ndarray::ArrayD<f64>, prefix: &str, folder_path: &str) {
     if frame.shape().is_empty() { panic!("lenia_ca::export_frame_as_png() - Can not export an empty frame!") }
 
     let path_base = format!("{}{}{}",
@@ -111,25 +128,25 @@ pub fn export_frame_as_png(frame: &ndarray::ArrayD<f64>, prefix: &str, folder_pa
 
     std::thread::spawn(move || {
         let mut indexes: Vec<usize> = vec![0; data.shape().len()];
-        nested_png_export(path_base, &data, &mut indexes, 0);
+        nested_png_export(bit_depth, path_base, &data, &mut indexes, 0);
     });
 }
 
-fn nested_png_export(path: String, data: &ndarray::ArrayD<f64>, indexes: &mut Vec<usize>, current_axis: usize) {
+fn nested_png_export(bit_depth: BitDepth, path: String, data: &ndarray::ArrayD<f64>, indexes: &mut Vec<usize>, current_axis: usize) {
     if current_axis == (indexes.len() - 2) {
         let file_path = format!("{}.png", &path);
         println!("{}", &file_path);
         let file = std::fs::File::create(file_path).unwrap();
         let buf_writer = std::io::BufWriter::new(file);
+        let width = data.shape()[data.shape().len()-2];
+        let height = data.shape()[data.shape().len()-1];
         let mut encoder = png::Encoder::new(
             buf_writer, 
-            data.shape()[data.shape().len()-2] as u32, 
-            data.shape()[data.shape().len()-1] as u32
+            width as u32, 
+            height as u32
         );
-        encoder.set_color(png::ColorType::Grayscale);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder.write_header().unwrap();
-        let image_data = data.slice_each_axis(
+        let mut image_data: Vec<u8> = Vec::with_capacity(width * height * if bit_depth == BitDepth::Eight {1} else {2});
+        let image_data_buffer = data.slice_each_axis(
             |a|{
                 if a.axis.index() == (indexes.len() - 2) || a.axis.index() == (indexes.len() - 1) {
                     return Slice {
@@ -147,15 +164,30 @@ fn nested_png_export(path: String, data: &ndarray::ArrayD<f64>, indexes: &mut Ve
                 }
             }
         )
-        .to_shape(((data.shape()[data.shape().len() - 2] * data.shape()[data.shape().len() - 1]), Order::ColumnMajor))
+        .to_shape(((width * height), Order::ColumnMajor))
         .unwrap()
-        .mapv(|el| { (el * 255.0) as u8 });
-        writer.write_image_data(image_data.as_slice().unwrap());
+        .mapv(|el| { el });
+
+        for i in 0..(width * height) {
+            if bit_depth == BitDepth::Eight {
+                image_data.push((image_data_buffer[[i]] * 255.0) as u8);
+            }
+            else {
+                let num = (image_data_buffer[[i]] * 65535.0) as u16;
+                image_data.push(num.get_high());
+                image_data.push(num.get_low());
+            }
+        }
+        encoder.set_depth(if bit_depth == BitDepth::Eight {png::BitDepth::Eight} else {png::BitDepth::Sixteen});
+        encoder.set_color(png::ColorType::Grayscale);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&image_data);
     }
     else {
         for i in 0..data.shape()[current_axis] {
             indexes[current_axis] = i;
             nested_png_export(
+                bit_depth,
                 format!("{}_{}", &path, i), 
                 data,
                 indexes,

@@ -4,8 +4,8 @@ use ndarray::{ArrayD};
 use lenia_ca::{growth_functions, kernels, lenias::*};
 use pixel_canvas::{Canvas, Color, input};
 
-const X_SIDE_LEN: usize = 200;
-const Y_SIDE_LEN: usize = 150;//X_SIDE_LEN/2;
+const X_SIDE_LEN: usize = 250;
+const Y_SIDE_LEN: usize = 200;//X_SIDE_LEN/2;
 const Z_SIDE_LEN: usize = 88;//X_SIDE_LEN/3;
 const SCALE: usize = 4;
 const STEPS: usize = 5000;
@@ -32,8 +32,9 @@ fn main() {
         &vec![1.0], 
         &vec![1.0/6.7]
     );
-    let loaded_kernel = lenia_ca::load_from_png("./inputs/testkernel.png");
-    lenia_ca::export_frame_as_png(&loaded_kernel, "kernel", "./output/");
+    lenia_ca::export_frame_as_png(lenia_ca::BitDepth::Sixteen, &kernel_3d, "hiqualitykernel", "./output/");
+    let loaded_kernel = lenia_ca::load_from_png("./output/hiqualitykernel.png");
+    //lenia_ca::export_frame_as_png(lenia_ca::BitDepth::Eight, &loaded_kernel, "kernel", "./output/");
     //let kernel_3d_clone = lenia_ca::Kernel::from(kernel_3d.clone(), &channel_shape);
     let kernel_3d_clone = lenia_ca::Kernel::from(loaded_kernel.clone(), &channel_shape);
     let kernel_3d = loaded_kernel;
@@ -163,6 +164,7 @@ fn main() {
             'd' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; }
             't' => { checking_transformed = !checking_transformed; }
             'c' => { lenia_ca::export_frame_as_png(
+                lenia_ca::BitDepth::Eight,
                 lenia_simulator.get_channel_as_ref(0), 
                 &"0", 
                 &r"./output"); 
