@@ -3,7 +3,7 @@ use num_complex::Complex;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use super::*;
-use super::fft::PlannedFFTND;
+use super::fft::{PlannedFFTND, PlannedParFFTND};
 
 /// `SimpleLenia` struct implements the non-extended Lenia system with a 2d field and 
 /// pre-set parameters to facilitate the creation of the
@@ -83,8 +83,8 @@ impl Lenia for StandardLenia {
         };
         
         StandardLenia{
-            forward_fft_instance: fft::PlannedParFFTND::new(shape, false, 1),
-            inverse_fft_instance: fft::PlannedParFFTND::new(shape, true, 1),
+            forward_fft_instance: fft::PlannedParFFTND::new(shape, false, 0),
+            inverse_fft_instance: fft::PlannedParFFTND::new(shape, true, 0),
             dt: 0.1,
             channel: channel,
             shape: shape.to_vec(),
@@ -197,35 +197,35 @@ impl Lenia for StandardLenia {
 
 
 
-/// `ExtendedLenia` struct implements the extended Lenia system, with support for n-dimensional
-/// channels, multiple channels, multiple kernels & growth functions (convolution channels) 
-/// and individual weights for convolution channels. 
-pub struct ExtendedLenia {
+/// `ExpandedLenia` struct implements the extended Lenia system, with support for multiple n-dimensional
+/// channels, multiple kernels & associated growth functions (convolution channels) and weights.  
+pub struct ExpandedLenia {
     dt: f64,
     channels: Vec<Channel>,
     deltas: Vec<ndarray::ArrayD<f64>>,
     shape: Vec<usize>,
     conv_channels: Vec<ConvolutionChannel>,
     convolutions: Vec<ndarray::ArrayD<Complex<f64>>>,
-    forward_fft_instances: Vec<fft::PlannedFFTND>,
-    inverse_fft_instances: Vec<fft::PlannedFFTND>,
+    forward_fft_instances: Vec<fft::PlannedParFFTND>,
+    inverse_fft_instances: Vec<fft::PlannedParFFTND>,
 }
 
-impl ExtendedLenia {
+impl ExpandedLenia {
     const DEFAULT_KERNEL_SIZE: usize = 28;
 }
 
-impl Lenia for ExtendedLenia {
+impl Lenia for ExpandedLenia {
     /// Create and initialize a new instance of "ExtendedLenia`. 
     fn new(shape: &[usize]) -> Self {
+        let mut max_kernel_diameter = Self::DEFAULT_KERNEL_SIZE;
         for (i, dim) in shape.iter().enumerate() {
-            if *dim < Self::DEFAULT_KERNEL_SIZE {
-                panic!("Axis {} is extremely small ({} pixels). Minimum size of each axis for 2D Standard Lenia is {} pixels.", i, *dim, Self::DEFAULT_KERNEL_SIZE);
+            if *dim < max_kernel_diameter {
+                max_kernel_diameter = *dim;
             }
         }
         let kernel = Kernel::from(
             kernels::gaussian_donut_nd(
-                Self::DEFAULT_KERNEL_SIZE, 
+                max_kernel_diameter, 
                 shape.len(),
                 1.0/6.7
             ), 
@@ -251,9 +251,9 @@ impl Lenia for ExtendedLenia {
             channel_shape.push(*dim);
         }
         
-        ExtendedLenia{
-            forward_fft_instances: vec![fft::PlannedFFTND::new(&channel_shape, false)],
-            inverse_fft_instances: vec![fft::PlannedFFTND::new(&channel_shape, true)],
+        ExpandedLenia{
+            forward_fft_instances: vec![fft::PlannedParFFTND::new(&channel_shape, false, 0)],
+            inverse_fft_instances: vec![fft::PlannedParFFTND::new(&channel_shape, true, 0)],
             dt: 0.1,
             channels: vec![channel],
             deltas: vec![ndarray::ArrayD::from_elem(shape, 0.0)],
@@ -282,8 +282,8 @@ impl Lenia for ExtendedLenia {
         let mut delta_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<f64>>>> = Vec::with_capacity(self.deltas.len());
         let mut conv_channel_mutexes: Vec<Arc<Mutex<ConvolutionChannel>>> = Vec::with_capacity(self.conv_channels.len());
         let mut convolution_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<Complex<f64>>>>> = Vec::with_capacity(self.convolutions.len());
-        let mut forward_fft_mutexes: Vec<Arc<Mutex<PlannedFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
-        let mut inverse_fft_mutexes: Vec<Arc<Mutex<PlannedFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
+        let mut forward_fft_mutexes: Vec<Arc<Mutex<PlannedParFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
+        let mut inverse_fft_mutexes: Vec<Arc<Mutex<PlannedParFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
 
         for _ in 0..self.channels.len() {
             channel_rwlocks.push(Arc::new(RwLock::new(self.channels.remove(0))));
@@ -466,8 +466,8 @@ impl Lenia for ExtendedLenia {
                         growth_params: vec![0.0],
                     }
                 );
-                self.forward_fft_instances.push(fft::PlannedFFTND::new(&self.shape, false));
-                self.inverse_fft_instances.push(fft::PlannedFFTND::new(&self.shape, true));
+                self.forward_fft_instances.push(fft::PlannedParFFTND::new(&self.shape, false, 0));
+                self.inverse_fft_instances.push(fft::PlannedParFFTND::new(&self.shape, true, 0));
                 self.convolutions.push(ndarray::ArrayD::from_elem(self.shape.clone(), Complex::new(0.0, 0.0)));
             }
             for channel in &mut self.channels {

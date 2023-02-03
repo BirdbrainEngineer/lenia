@@ -137,13 +137,19 @@ pub struct PlannedParFFTND {
 }
 
 impl PlannedParFFTND {
-    pub fn new(shape: &[usize], inverse: bool, concurrent_ffts: usize) -> Self {
+    pub fn new(shape: &[usize], inverse: bool, desired_threads: usize) -> Self {
         if shape.is_empty() { panic!("PlannedParFFTND::new() - Provided shape was empty! Needs at least 1 dimension!"); }
-        let mut threads = (std::thread::available_parallelism().unwrap().get() as f64 / concurrent_ffts as f64).ceil() as usize;
-        if threads == 0 { threads = 1; }
-        for dim in shape {
+        let mut threads: usize; 
+        if desired_threads == 0 { 
+            threads = std::thread::available_parallelism().unwrap().get() as usize; 
+        }
+        else {
+            threads = desired_threads;
+        }
+        for (i, dim) in shape.iter().enumerate() {
             if threads > *dim { 
                 threads = *dim;
+                println!("Warning: Axis {} too short for desired number of threads!", i);
              }
         }
         let mut ffts: Vec<Vec<Arc<Mutex<PlannedFFT>>>> = Vec::with_capacity(shape.len());
@@ -160,6 +166,10 @@ impl PlannedParFFTND {
             inverse: inverse,
             threads: threads,
         }
+    }
+
+    pub fn adjust_threads(&mut self, ) {
+
     }
 
     pub fn shape(&self) -> &[usize] {

@@ -3,6 +3,7 @@
 #[cfg(target_has_atomic = "ptr")]
 
 use std::fmt;
+use std::ops::Index;
 use ndarray::{self, Axis, Slice, Order, IxDyn};
 use num_complex::Complex;
 use png;
@@ -25,17 +26,80 @@ pub mod seeders;
 /// 
 /// ### Returns
 /// `f64` value of the defined gaussian distribution evaluated at x. 
+
+trait SetBytes {
+    fn set_low(&mut self, value: u8);
+    fn set_high(&mut self, value: u8);
+}
+
+impl SetBytes for u16 {
+    fn set_low(&mut self, value: u8) {
+        *self &= !0xff;
+        *self |= value as u16;
+    }
+    fn set_high(&mut self, value: u8) {
+        *self &= !0xff00;
+        *self |= (value as u16) << 8;
+    }
+}
+
 pub fn sample_normal(x: f64, mu: f64, stddev: f64) -> f64 {
     (-(((x - mu) * (x - mu))/(2.0 * (stddev * stddev)))).exp()
 }
 
-pub fn store_frame_as_png(frame: &ndarray::ArrayD<f64>, frame_number: usize, folder_path: &str) {
-    if frame.shape().is_empty() { panic!("lenia_ca::store_frame() - Can not store an empty frame!") }
+pub fn load_from_png(file_path: &str) -> ndarray::ArrayD<f64> {
+    let decoder = png::Decoder::new(std::fs::File::open(file_path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    if info.bit_depth != png::BitDepth::Eight && info.bit_depth != png::BitDepth::Sixteen {
+        panic!("lenia_ca::load_from_png() - Unable to load from .png, as it has a bit depth of less than 8!");
+    }
+    let output: ndarray::ArrayD::<f64>;
+    let offset: usize;
+    match info.color_type {
+        png::ColorType::Grayscale => {
+            if info.bit_depth == png::BitDepth::Eight { offset = 1; }
+            else { offset = 2; }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            if info.bit_depth == png::BitDepth::Eight { offset = 2; }
+            else { offset = 4; }
+        }
+        png::ColorType::Rgb => { 
+            if info.bit_depth == png::BitDepth::Eight { offset = 3; }
+            else { offset = 6; }
+        }
+        png::ColorType::Rgba => { 
+            if info.bit_depth == png::BitDepth::Eight { offset = 4; }
+            else { offset = 8; }
+        }
+        _ => { panic!("lenia_ca::load_from_png() - Unsupported color type!"); }
+    }
+    let shape = [info.width as usize, info.height as usize];
+    if info.bit_depth == png::BitDepth::Sixteen {
+        output = ndarray::ArrayD::from_shape_fn(IxDyn(&shape), |a| {
+            let mut num: u16 = 0;
+            num.set_high(*buf.get((a[1] * info.width as usize * offset) + (a[0] * offset)).unwrap());
+            num.set_low(*buf.get((a[1] * info.width as usize * offset) + (a[0] * offset + 1)).unwrap());
+            num as f64 * (1.0 / 65535.0)
+        });
+    }
+    else {
+        output = ndarray::ArrayD::from_shape_fn(IxDyn(&shape), |a| {
+            *buf.get((a[1] * info.width as usize * offset) + (a[0] * offset)).unwrap() as f64 * (1.0 / 255.0)
+        });
+    }
+    output
+}
+
+pub fn export_frame_as_png(frame: &ndarray::ArrayD<f64>, prefix: &str, folder_path: &str) {
+    if frame.shape().is_empty() { panic!("lenia_ca::export_frame_as_png() - Can not export an empty frame!") }
 
     let path_base = format!("{}{}{}",
         if folder_path.is_empty() { &"./" } else { folder_path.clone() }, 
         if folder_path.chars().last().unwrap() != '/' && folder_path.chars().last().unwrap() != '\\' { &"/" } else { &"" },
-        frame_number
+        prefix
     );
     let data;
     if frame.shape().len() == 1 {
@@ -119,9 +183,14 @@ impl<L: Lenia> Simulator<L> {
     /// * `channel_shape` - The shape (number of dimensions and their lengths) of the
     /// channels for the `Lenia` instance. 
     /// 
-    /// ### Returns
-    /// A new instance of a `Simulator`. 
+    /// ### Panics
+    /// If any axis length in `channel_shape`is `0`.
     pub fn new(channel_shape: &[usize]) -> Self {
+        for (i, dim) in channel_shape.iter().enumerate() {
+            if *dim == 0 {
+                panic!("Simulator::new() - Axis {} of the provided shape has a length of 0! Each axis must have a length of at least 1.", i);
+            }
+        }
         Simulator{
             sim: L::new(channel_shape),
         }
