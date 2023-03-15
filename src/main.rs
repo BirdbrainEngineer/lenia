@@ -4,11 +4,11 @@ use ndarray::{ArrayD};
 use lenia_ca::{growth_functions, kernels, lenias::*};
 use pixel_canvas::{Canvas, Color, input};
 
-const X_SIDE_LEN: usize = 250;
-const Y_SIDE_LEN: usize = 200;//X_SIDE_LEN/2;
-const Z_SIDE_LEN: usize = 88;//X_SIDE_LEN/3;
+const X_SIDE_LEN: usize = 150;
+const Y_SIDE_LEN: usize = 150;
+const Z_SIDE_LEN: usize = 150;
 const SCALE: usize = 4;
-const STEPS: usize = 5000;
+const STEPS: usize = 2;
 const GAIN: f64 = 5000.0;
 
 
@@ -19,26 +19,27 @@ fn main() {
     let mut checking_kernel = true;
     let mut checking_transformed = false;
     let mut z_depth = Z_SIDE_LEN/2;
-    let kernel_diameter = 38;
+    let kernel_diameter = 32;
     let mut kernel_z_depth = kernel_diameter / 2;
-    let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
+    let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN, Z_SIDE_LEN];
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
-    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.15, 0.0177], 0);
+    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.13, 0.0171], 0);
     let kernel_3d = kernels::multi_gaussian_donut_nd(
         kernel_diameter, 
-        2, 
-        &vec![0.5], 
-        &vec![1.0], 
-        &vec![1.0/6.7]
+        3, 
+        &vec![0.75, 0.37], 
+        &vec![0.45, 0.95], 
+        &vec![1.0/12.3, 1.0/10.7],
     );
-    lenia_ca::export_frame_as_png(lenia_ca::BitDepth::Sixteen, &kernel_3d, "hiqualitykernel", "./output/");
-    let loaded_kernel = lenia_ca::load_from_png("./output/hiqualitykernel.png");
+    //lenia_ca::export_frame_as_png(lenia_ca::BitDepth::Sixteen, &kernel_3d, "hiqualitykernel", "./output/");
+    //let loaded_kernel = lenia_ca::load_from_png("./output/hiqualitykernel.png");
     //lenia_ca::export_frame_as_png(lenia_ca::BitDepth::Eight, &loaded_kernel, "kernel", "./output/");
     //let kernel_3d_clone = lenia_ca::Kernel::from(kernel_3d.clone(), &channel_shape);
-    let kernel_3d_clone = lenia_ca::Kernel::from(loaded_kernel.clone(), &channel_shape);
-    let kernel_3d = loaded_kernel;
+    let kernel_3d_clone = lenia_ca::Kernel::from(kernel_3d.clone(), &channel_shape);
+    //let kernel_3d = loaded_kernel;
     lenia_simulator.set_kernel(kernel_3d, 0);
+    lenia_simulator.set_dt(0.05);
 
     // //Test extended lenia 1 - creates an evolving blob, that eventually evolves into a sporadic glider
     // // 2d channel shape
@@ -110,9 +111,27 @@ fn main() {
 
     //lenia_simulator.set_kernel(kernel_into_sim, 0);
 
-    /*for i in 0..STEPS {
+    lenia_simulator.fill_channel(
+        &lenia_ca::seeders::random_hypercubic_patches(
+            lenia_simulator.shape(), 
+            kernel_diameter, 
+            1, 
+            0.45, 
+            false
+        ), 
+        0
+    );
+
+    for i in 0..STEPS {
         lenia_simulator.iterate();
-    }*/
+    }
+    /*lenia_ca::export_frame_as_png(
+        lenia_ca::BitDepth::Eight,
+        lenia_simulator.get_channel_as_ref(0), 
+        &"0", 
+        &r"./output/density"
+    ).join().unwrap();
+    */
 
     
     let canvas = Canvas::new(X_SIDE_LEN * SCALE, Y_SIDE_LEN * SCALE)
@@ -128,7 +147,7 @@ fn main() {
                     &lenia_ca::seeders::random_hypercubic_patches(
                         lenia_simulator.shape(), 
                         kernel_diameter, 
-                        20, 
+                        1, 
                         0.45, 
                         false
                     ), 
@@ -160,14 +179,19 @@ fn main() {
             'k' => { checking_kernel = !checking_kernel; }
             '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.5); }
             '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 0.75); }
-            'u' => { if z_depth != (Z_SIDE_LEN-1) { z_depth += 1 }; if kernel_z_depth != (kernel_diameter-1) { kernel_z_depth += 1 }; }
-            'd' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; }
+            'u' => { if z_depth != (Z_SIDE_LEN-1) { z_depth += 1 }; if kernel_z_depth != (kernel_diameter-1) { kernel_z_depth += 1 }; println!("Depth: {}", z_depth); }
+            'd' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; println!("Depth: {}", z_depth); }
             't' => { checking_transformed = !checking_transformed; }
             'c' => { lenia_ca::export_frame_as_png(
-                lenia_ca::BitDepth::Eight,
-                lenia_simulator.get_channel_as_ref(0), 
-                &"0", 
-                &r"./output"); 
+                    lenia_ca::BitDepth::Eight,
+                    lenia_simulator.get_channel_as_ref(0), 
+                    &"0", 
+                    &r"./output/density");
+                lenia_ca::export_frame_as_png(
+                    lenia_ca::BitDepth::Eight,
+                    lenia_simulator.get_channel_as_ref(0), 
+                    &"0", 
+                    &r"./output/delta/"); 
             }
             _ => {}
         }
@@ -245,5 +269,5 @@ fn main() {
             }
         }
     });
-
+    
 }

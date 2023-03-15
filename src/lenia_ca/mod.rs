@@ -3,7 +3,7 @@
 #[cfg(target_has_atomic = "ptr")]
 
 use std::fmt;
-use std::ops::Index;
+use std::{ops::Index, thread::JoinHandle};
 use ndarray::{self, Axis, Slice, Order, IxDyn};
 use num_complex::Complex;
 use png;
@@ -110,7 +110,7 @@ pub fn load_from_png(file_path: &str) -> ndarray::ArrayD<f64> {
     output
 }
 
-pub fn export_frame_as_png(bit_depth: BitDepth, frame: &ndarray::ArrayD<f64>, prefix: &str, folder_path: &str) {
+pub fn export_frame_as_png(bit_depth: BitDepth, frame: &ndarray::ArrayD<f64>, prefix: &str, folder_path: &str) -> JoinHandle<()>{
     if frame.shape().is_empty() { panic!("lenia_ca::export_frame_as_png() - Can not export an empty frame!") }
 
     let path_base = format!("{}{}{}",
@@ -129,7 +129,7 @@ pub fn export_frame_as_png(bit_depth: BitDepth, frame: &ndarray::ArrayD<f64>, pr
     std::thread::spawn(move || {
         let mut indexes: Vec<usize> = vec![0; data.shape().len()];
         nested_png_export(bit_depth, path_base, &data, &mut indexes, 0);
-    });
+    })
 }
 
 fn nested_png_export(bit_depth: BitDepth, path: String, data: &ndarray::ArrayD<f64>, indexes: &mut Vec<usize>, current_axis: usize) {

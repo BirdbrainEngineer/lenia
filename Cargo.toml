@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ndarray = "0.15.6"
+ndarray = { version = "0.15.6", features = ["rayon"] }
 rustfft = "6.1.0"
 num-complex = "0.4.2"
 pixel-canvas = "0.2.3"
@@ -14,6 +14,7 @@ glium = "*"
 probability = "0.20.3"
 rand = "0.8.5"
 png = "0.17.7"
+rayon = "1.7.0"
 
 #[profile.release]
 #debug = 2

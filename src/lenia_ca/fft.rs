@@ -6,7 +6,8 @@ use rustfft::{Fft, FftNum, FftPlanner, FftDirection};
 use std::collections::VecDeque;
 use rustfft::num_complex::Complex;
 use rustfft::num_traits::{Zero, Float};
-use ndarray::{Dimension, Array, Array2, AssignElem, IntoNdProducer};
+use ndarray::{Dimension, Array, Array2, AssignElem, IntoNdProducer, NdProducer};
+use rayon::prelude::*;
 
 
 #[derive(Clone)]
@@ -23,6 +24,18 @@ impl fmt::Debug for PlannedFFT {
          .finish()
     }
 }
+
+/*impl ndarray::IntoNdProducer for PlannedFFT {
+    type Item = PlannedFFT;
+
+    type Dim = ndarray::Ix1;
+
+    type Output;
+
+    fn into_producer(self) -> Self::Output {
+        todo!()
+    }
+}*/
 
 impl PlannedFFT {
     pub fn new(length: usize, inverse: bool) -> Self {
@@ -128,6 +141,75 @@ impl PlannedFFTND {
 
 
 
+#[derive(Debug)]
+pub struct ParPlannedFFTND {
+    shape: Vec<usize>,
+    fft_instances: Vec<ndarray::ArrayD<PlannedFFT>>,
+    inverse: bool
+}
+
+impl ParPlannedFFTND {
+    pub fn new(shape: &[usize], inverse: bool) -> Self {
+        if shape.is_empty() { panic!("ParPlannedFFTND::new() - Provided shape was empty! Needs at least 1 dimension!"); }
+        /*let base_dim = shape[0];
+        for dim in shape {
+            if *dim != base_dim { panic!("PlannedFFTND::new() - Dimensions not the same length. Differing dimensions not implemented."); }
+        }*/
+        let mut ffts: Vec<ndarray::ArrayD<PlannedFFT>> = Vec::with_capacity(shape.len());
+        for dim in shape {
+            let dim_ffts = vec![PlannedFFT::new(*dim, inverse); *dim];
+            let dim_ffts = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&[*dim]), dim_ffts).unwrap();
+            ffts.push(dim_ffts);
+        }
+        ParPlannedFFTND {
+            shape: shape.to_vec(),
+            fft_instances: ffts,
+            inverse: inverse,
+        }
+    }
+
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    pub fn inverse(&self) -> bool {
+        self.inverse
+    }
+
+    pub fn transform(&mut self, data: &mut ndarray::ArrayD<Complex<f64>>) {
+        if data.shape() != self.shape { panic!("ParPlannedFFTND::transform() - shape of the data to be transformed does not agree with the shape that the fft can work on!"); }
+        let mut axis_iterator: Vec<usize> = Vec::with_capacity(self.shape.len());
+        if self.inverse() {
+            for i in (0..self.shape.len()).rev() {
+                axis_iterator.push(i);
+            }
+        }
+        else {
+            for i in 0..self.shape.len() {
+                axis_iterator.push(i);
+            }
+        }
+        for axis in axis_iterator {
+            //data.swap_axes(axis, data.ndim() - 1);
+            let mut data_lane = data.lanes_mut(ndarray::Axis(axis));
+            let mut fft_lane = &mut self.fft_instances[axis];
+            ndarray::Zip::from(data_lane)
+                .into_par_iter()
+                .for_each_with(self.fft_instances[axis][0].clone(), |mut fft, mut row| {
+                    let mut lane = row.0.to_vec();
+                    fft.transform(&mut lane);
+                    for i in 0..row.0.len() {
+                        row.0[i] = lane[i];
+                    }
+                });
+            //data.swap_axes(axis, data.ndim() - 1);
+        }
+    }
+}
+
+
+
+/* 
 #[derive(Debug)]
 pub struct PlannedParFFTND {
     shape: Vec<usize>,
@@ -238,4 +320,4 @@ impl PlannedParFFTND {
             }
         }
     }
-}
+}*/
