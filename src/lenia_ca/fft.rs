@@ -144,7 +144,7 @@ impl PlannedFFTND {
 #[derive(Debug)]
 pub struct ParPlannedFFTND {
     shape: Vec<usize>,
-    fft_instances: Vec<ndarray::ArrayD<PlannedFFT>>,
+    fft_instances: Vec<PlannedFFT>,
     inverse: bool
 }
 
@@ -155,11 +155,9 @@ impl ParPlannedFFTND {
         for dim in shape {
             if *dim != base_dim { panic!("PlannedFFTND::new() - Dimensions not the same length. Differing dimensions not implemented."); }
         }*/
-        let mut ffts: Vec<ndarray::ArrayD<PlannedFFT>> = Vec::with_capacity(shape.len());
+        let mut ffts: Vec<PlannedFFT> = Vec::with_capacity(shape.len());
         for dim in shape {
-            let dim_ffts = vec![PlannedFFT::new(*dim, inverse); *dim];
-            let dim_ffts = ndarray::ArrayD::from_shape_vec(ndarray::IxDyn(&[*dim]), dim_ffts).unwrap();
-            ffts.push(dim_ffts);
+            ffts.push(PlannedFFT::new(*dim, inverse));
         }
         ParPlannedFFTND {
             shape: shape.to_vec(),
@@ -190,19 +188,17 @@ impl ParPlannedFFTND {
             }
         }
         for axis in axis_iterator {
-            //data.swap_axes(axis, data.ndim() - 1);
             let mut data_lane = data.lanes_mut(ndarray::Axis(axis));
             let mut fft_lane = &mut self.fft_instances[axis];
             ndarray::Zip::from(data_lane)
                 .into_par_iter()
-                .for_each_with(self.fft_instances[axis][0].clone(), |mut fft, mut row| {
+                .for_each_with(self.fft_instances[axis].clone(), |mut fft, mut row| {
                     let mut lane = row.0.to_vec();
                     fft.transform(&mut lane);
                     for i in 0..row.0.len() {
                         row.0[i] = lane[i];
                     }
                 });
-            //data.swap_axes(axis, data.ndim() - 1);
         }
     }
 }
