@@ -6,6 +6,11 @@
 use super::*;
 use rand::Rng;
 
+/// Generates an n-dimensional field filled with `constant`.
+pub fn constant(shape: &[usize], constant: f64) -> ndarray::ArrayD<f64> {
+    ndarray::ArrayD::from_shape_fn(shape,|_| { constant })
+}
+
 /// Generates an n-dimensional field with uniformly random values.
 /// 
 /// ### Arguments

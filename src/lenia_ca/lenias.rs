@@ -1,4 +1,4 @@
-use ndarray;
+use ndarray::{self, Zip, IntoNdProducer};
 use num_complex::Complex;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -22,8 +22,6 @@ pub struct StandardLenia {
     convolved: ndarray::ArrayD<Complex<f64>>,
     forward_fft_instance: fft::ParPlannedFFTND,
     inverse_fft_instance: fft::ParPlannedFFTND,
-    //forward_fft_instance: fft::PlannedParFFTND,
-    //inverse_fft_instance: fft::PlannedParFFTND,
 }
 
 impl StandardLenia {
@@ -82,13 +80,12 @@ impl Lenia for StandardLenia {
             field: ndarray::ArrayD::from_elem(shape, 0.0),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
+            mode: ChannelMode::Positive,
         };
         
         StandardLenia{
             forward_fft_instance: fft::ParPlannedFFTND::new(shape, false),
             inverse_fft_instance: fft::ParPlannedFFTND::new(shape, true),
-            //forward_fft_instance: fft::PlannedParFFTND::new(shape, false, 0),
-            //inverse_fft_instance: fft::PlannedParFFTND::new(shape, true, 0),
             dt: 0.1,
             channel: channel,
             shape: shape.to_vec(),
@@ -170,6 +167,10 @@ impl Lenia for StandardLenia {
         &mut self.channel.field
     }
 
+    fn get_deltas_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
+        &mut self.channel.field
+    }
+
     fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
         &self.convolved
     }
@@ -197,6 +198,15 @@ impl Lenia for StandardLenia {
     fn weights(&self, channel: usize) -> &[f64] {
         &self.channel.weights
     }
+
+    fn get_channel_mode(&self, channel: usize) -> Option<ChannelMode> {
+        println!("Channel modes not available for standard Lenia!");
+        Option::None
+    }
+
+    fn set_channel_mode(&mut self, channel: usize, mode: ChannelMode) {
+        println!("Channel modes not available for standard Lenia!");
+    }
 }
 
 
@@ -212,8 +222,6 @@ pub struct ExpandedLenia {
     convolutions: Vec<ndarray::ArrayD<Complex<f64>>>,
     forward_fft_instances: Vec<fft::ParPlannedFFTND>,
     inverse_fft_instances: Vec<fft::ParPlannedFFTND>,
-    //forward_fft_instances: Vec<fft::PlannedParFFTND>,
-    //inverse_fft_instances: Vec<fft::PlannedParFFTND>,
 }
 
 impl ExpandedLenia {
@@ -250,6 +258,7 @@ impl Lenia for ExpandedLenia {
             field: ndarray::ArrayD::from_elem(shape, 0.0),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
+            mode: ChannelMode::Positive,
         };
 
         let mut channel_shape = Vec::new();
@@ -260,8 +269,6 @@ impl Lenia for ExpandedLenia {
         ExpandedLenia{
             forward_fft_instances: vec![fft::ParPlannedFFTND::new(&channel_shape, false)],
             inverse_fft_instances: vec![fft::ParPlannedFFTND::new(&channel_shape, true)],
-            //forward_fft_instances: vec![fft::PlannedParFFTND::new(&channel_shape, false, 0)],
-            //inverse_fft_instances: vec![fft::PlannedParFFTND::new(&channel_shape, true, 0)],
             dt: 0.1,
             channels: vec![channel],
             deltas: vec![ndarray::ArrayD::from_elem(shape, 0.0)],
@@ -287,17 +294,15 @@ impl Lenia for ExpandedLenia {
         //Create mutexes and rwlocks
         let mut sources: Vec<usize> = Vec::with_capacity(self.conv_channels.len());
         let mut channel_rwlocks: Vec<Arc<RwLock<Channel>>> = Vec::with_capacity(self.channels.len());
-        let mut delta_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<f64>>>> = Vec::with_capacity(self.deltas.len());
+        let mut delta_rwlocks: Vec<Arc<RwLock<ndarray::ArrayD<f64>>>> = Vec::with_capacity(self.deltas.len());
         let mut conv_channel_mutexes: Vec<Arc<Mutex<ConvolutionChannel>>> = Vec::with_capacity(self.conv_channels.len());
         let mut convolution_mutexes: Vec<Arc<Mutex<ndarray::ArrayD<Complex<f64>>>>> = Vec::with_capacity(self.convolutions.len());
         let mut forward_fft_mutexes: Vec<Arc<Mutex<ParPlannedFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
         let mut inverse_fft_mutexes: Vec<Arc<Mutex<ParPlannedFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
-        //let mut forward_fft_mutexes: Vec<Arc<Mutex<PlannedParFFTND>>> = Vec::with_capacity(self.forward_fft_instances.len());
-        //let mut inverse_fft_mutexes: Vec<Arc<Mutex<PlannedParFFTND>>> = Vec::with_capacity(self.inverse_fft_instances.len());
 
         for _ in 0..self.channels.len() {
             channel_rwlocks.push(Arc::new(RwLock::new(self.channels.remove(0))));
-            delta_mutexes.push(Arc::new(Mutex::new(self.deltas.remove(0))));
+            delta_rwlocks.push(Arc::new(RwLock::new(self.deltas.remove(0))));
         }
         for _ in 0..self.conv_channels.len() {
             sources.push(self.conv_channels[0].input_channel);
@@ -315,6 +320,7 @@ impl Lenia for ExpandedLenia {
             let axes_clone = axes.clone();
             let inverse_axes_clone = inverse_axes.clone();
             let source_lock = Arc::clone(&channel_rwlocks[sources[i]]);
+            let delta_lock = Arc::clone(&delta_rwlocks[sources[i]]);
             let convolution_lock = Arc::clone(&convolution_mutexes[i]);
             let convolution_channel_lock = Arc::clone(&conv_channel_mutexes[i]);
             let forward_fft_lock = Arc::clone(&forward_fft_mutexes[i]);
@@ -323,6 +329,7 @@ impl Lenia for ExpandedLenia {
             convolution_handles.push(thread::spawn(move || {
                 let mut convolution_channel = convolution_channel_lock.lock().unwrap();
                 let input = source_lock.read().unwrap();
+                let delta = delta_lock.read().unwrap();
                 let mut convolution = convolution_lock.lock().unwrap();
                 let mut forward_fft = forward_fft_lock.lock().unwrap();
                 let mut inverse_fft = inverse_fft_lock.lock().unwrap();
@@ -379,17 +386,18 @@ impl Lenia for ExpandedLenia {
         for i in 0..channel_rwlocks.len() {
             let dt = self.dt.clone();
             let channel_lock = Arc::clone(&channel_rwlocks[i]);
-            let delta_lock = Arc::clone(&delta_mutexes[i]);
+            let delta_lock = Arc::clone(&delta_rwlocks[i]);
             let convoluted_results_lock = Arc::clone(&convoluted_results_rwlock);
             
             // Thread code
             summing_handles.push(thread::spawn(move || {
                 let mut channel = channel_lock.write().unwrap();
-                let mut deltas = delta_lock.lock().unwrap();
+                let mut deltas = delta_lock.write().unwrap();
                 let convoluted_results = convoluted_results_lock.read().unwrap();
 
+                let previous_deltas = deltas.clone();
                 // Apply weighted sums and dt to get the delta to be added to channel
-                for i in 0..channel.weights.len() {
+                for i in 0..channel.weights.len(){
                     deltas.zip_mut_with(&convoluted_results[i].field, 
                         |a, b| {
                             if i == 0 { *a = 0.0; }
@@ -398,12 +406,30 @@ impl Lenia for ExpandedLenia {
                         }
                     );
                 }
-                // Add delta to channel and clamp
-                channel.field.zip_mut_with(&mut deltas, 
-                    |a, b| {
-                        *a = (*a + (*b * dt)).clamp(0.0, 1.0);
+                // Add update channel and clamp
+                let mode = channel.mode;
+                let dt_reciprocal = 1.0 / dt;
+                ndarray::Zip::from(&mut channel.field).and(&mut deltas.view_mut()).and(&previous_deltas).par_for_each(|a, b, c| {
+                    let previous = *a;
+                    match mode {
+                        ChannelMode::Positive => { *a = (previous + (*b * dt)).clamp(0.0, 1.0); }
+                        ChannelMode::Negative => { *a = (previous + (*b * dt)).clamp(-1.0, 0.0); }
+                        ChannelMode::Fullrange => { *a = (previous + (*b * dt)).clamp(-1.0, 1.0); }
+                        ChannelMode::Activation => { *a = *b; }
+                        ChannelMode::DeltaPositive => { 
+                            *a = ((*c + (*b * dt)).clamp(0.0, 1.0) - *c) * dt_reciprocal; 
+                            *b = (*c + (*b * dt)).clamp(0.0, 1.0);
+                        }
+                        ChannelMode::DeltaNegative => { 
+                            *a = ((*c + (*b * dt)).clamp(-1.0, 0.0) - *c) * dt_reciprocal; 
+                            *b = (*c + (*b * dt)).clamp(-1.0, 0.0);
+                        }
+                        ChannelMode::DeltaFullrange => { 
+                            *a = ((*c + (*b * dt)).clamp(-1.0, 1.0) - *c) * dt_reciprocal; 
+                            *b = (*c + (*b * dt)).clamp(-1.0, 1.0);
+                        }
                     }
-                );
+                });
             }));
         }
 
@@ -422,7 +448,7 @@ impl Lenia for ExpandedLenia {
 
         for _ in 0..channel_rwlocks.len() {
             self.channels.push(Arc::try_unwrap(channel_rwlocks.remove(0)).unwrap().into_inner().unwrap());
-            self.deltas.push(Arc::try_unwrap(delta_mutexes.remove(0)).unwrap().into_inner().unwrap());
+            self.deltas.push(Arc::try_unwrap(delta_rwlocks.remove(0)).unwrap().into_inner().unwrap());
         }
         
     }
@@ -442,6 +468,7 @@ impl Lenia for ExpandedLenia {
                         field: ndarray::ArrayD::from_elem(self.shape.clone(), 0.0),
                         weights: weights_prototype.clone(),
                         weight_sum_reciprocal: 0.0,
+                        mode: ChannelMode::Positive,
                     }
                 );
                 self.deltas.push(ndarray::ArrayD::from_elem(self.shape.clone(), 0.0));
@@ -504,7 +531,10 @@ impl Lenia for ExpandedLenia {
                 weights.push(new_weights[i]);
             }
         }
-        let sum: f64 = weights.iter().sum();
+        let mut sum: f64 = 0.0;
+        for weight in &weights {
+            sum += weight.abs();
+        }
         self.channels[channel].weights = weights;
         self.channels[channel].weight_sum_reciprocal = 1.0 / sum;
     }
@@ -538,6 +568,10 @@ impl Lenia for ExpandedLenia {
         &mut self.channels[channel].field
     }
 
+    fn get_deltas_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
+        &mut self.deltas[channel]
+    }
+
     fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
         &self.convolutions[conv_channel]
     }
@@ -565,6 +599,14 @@ impl Lenia for ExpandedLenia {
     fn weights(&self, channel: usize) -> &[f64] {
         &self.channels[channel].weights
     } 
+
+    fn get_channel_mode(&self, channel: usize) -> Option<ChannelMode> {
+        Option::Some(self.channels[channel].mode)
+    }
+
+    fn set_channel_mode(&mut self, channel: usize, mode: ChannelMode) {
+        self.channels[channel].mode = mode;
+    }
 }
 
 

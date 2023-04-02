@@ -4,7 +4,7 @@
 
 use std::fmt;
 use std::{ops::Index, thread::JoinHandle};
-use ndarray::{self, Axis, Slice, Order, IxDyn};
+use ndarray::{self, Axis, Slice, Order, IxDyn, Zip};
 use num_complex::Complex;
 use png;
 mod fft;
@@ -62,6 +62,53 @@ pub enum BitDepth {
 /// * `stddev` - Standard deviation of the normal distribution. 
 pub fn sample_normal(x: f64, mu: f64, stddev: f64) -> f64 {
     (-(((x - mu) * (x - mu))/(2.0 * (stddev * stddev)))).exp()
+}
+
+pub fn sample_exponential(x: f64, exponent: f64, peak: f64) -> f64 {
+    peak * (-(x * exponent)).exp()
+}
+
+/// Receives a 2d array (`ndarray::Array2`) of `f64` values of a 2d slice of a channel's data. 
+/// Use this to simply get a 2d frame for rendering. 
+/// 
+/// ### Arguments
+/// 
+/// * `channel` - Index of the channel to retrieve data from.
+/// 
+/// * `display_axes` - Indexes of the axes to retrieve
+/// 
+/// * `dimensions` - Which indexes in any other axes the 2d slice is taken from. 
+/// The entries for axes selected in `display_axes` can be any number, and will be disregarded. 
+/// 
+/// ### Panics
+/// 
+/// If the specified `channel` does not exist. 
+pub fn get_frame(output: &mut ndarray::Array2<f64>, input: &ndarray::ArrayD<f64>, display_axes: &[usize; 2], dimensions: &[usize]) {
+    let data = input.slice_each_axis(
+        |a|{
+            if a.axis.index() == display_axes[0] || a.axis.index() == display_axes[1] {
+                return Slice {
+                    start: 0,
+                    end: None,
+                    step: 1,
+                }
+            }
+            else {
+                return Slice {
+                    start: dimensions[a.axis.index()] as isize,
+                    end: Some((dimensions[a.axis.index()] + 1) as isize),
+                    step: 1,
+                }
+            }
+        }
+    );
+    let data = data.to_shape(
+        ((
+            input.shape()[display_axes[0]],
+            input.shape()[display_axes[1]]
+        ), Order::RowMajor)
+    ).unwrap();
+    ndarray::Zip::from(output).and(&data).par_for_each(|a, b| { *a = *b; });
 }
 
 pub fn load_from_png(file_path: &str) -> ndarray::ArrayD<f64> {
@@ -417,6 +464,16 @@ impl<L: Lenia> Simulator<L> {
                 *a = *b;
             }
         );
+        self.sim.get_deltas_as_mut_ref(channel).zip_mut_with(&data, |a, b| { *a = *b; });
+        //self.sim.get_deltas_as_mut_ref(channel).par_mapv_inplace(|_| { 0.0 });
+    }
+
+    pub fn get_channel_mode(&self, channel: usize) -> ChannelMode {
+        self.sim.get_channel_mode(channel).unwrap()
+    }
+
+    pub fn set_channel_mode(&mut self, channel: usize, mode: ChannelMode) {
+        self.sim.set_channel_mode(channel, mode);
     }
 
     /// Retrieve a referenced to the specified channel's data. 
@@ -450,6 +507,10 @@ impl<L: Lenia> Simulator<L> {
             panic!("Simulator::get_channel_data_as_ref() - Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
         }
         self.sim.get_channel_as_mut_ref(channel)
+    }
+
+    pub fn get_deltas_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
+        self.sim.get_deltas_as_mut_ref(channel)
     }
     
     /// Retrieve a reference to the specified channel's "deltas". Deltas are the amounts added onto the 
@@ -505,52 +566,6 @@ impl<L: Lenia> Simulator<L> {
             panic!("Simulator::get_grown_as_ref() - Specified convolution channel (index {}) does not exist. Current number of convolution channels: {}.", convolution_channel, self.sim.conv_channels());
         }
         self.sim.get_grown_as_ref(convolution_channel)
-    }
-
-    /// Receives a 2d array (`ndarray::Array2`) of `f64` values of a 2d slice of a channel's data. 
-    /// Use this to simply get a 2d frame for rendering. 
-    /// 
-    /// ### Arguments
-    /// 
-    /// * `channel` - Index of the channel to retrieve data from.
-    /// 
-    /// * `display_axes` - Indexes of the axes to retrieve
-    /// 
-    /// * `dimensions` - Which indexes in any other axes the 2d slice is taken from. 
-    /// The entries for axes selected in `display_axes` can be any number, and will be disregarded. 
-    /// 
-    /// ### Panics
-    /// 
-    /// If the specified `channel` does not exist. 
-    pub fn get_frame(&self, channel: usize, display_axes: &[usize; 2], dimensions: &[usize]) -> ndarray::Array2<f64> {
-        if channel >= self.sim.channels() {
-            panic!("Simulator::get_frame: Specified channel (index {}) does not exist. Current number of channels: {}.", channel, self.sim.channels());
-        }
-        let data_ref = self.sim.get_channel_as_ref(channel);
-        return data_ref.slice_each_axis(
-            |a|{
-                if a.axis.index() == display_axes[0] || a.axis.index() == display_axes[1] {
-                    return Slice {
-                        start: 0,
-                        end: None,
-                        step: 1,
-                    }
-                }
-                else {
-                    return Slice {
-                        start: dimensions[a.axis.index()] as isize,
-                        end: Some((dimensions[a.axis.index()] + 1) as isize),
-                        step: 1,
-                    }
-                }
-            }
-        ).to_shape(
-            ((
-                data_ref.shape()[display_axes[0]],
-                data_ref.shape()[display_axes[1]]
-            ), Order::RowMajor)
-        ).unwrap()
-        .mapv(|el| { el })
     }
 
     /// Get the current integration step (a.k.a. timestep) parameter `dt` of the `Lenia` instance.
@@ -619,6 +634,8 @@ pub trait Lenia {
     fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64>;
     /// Returns a mutable reference to a channel's current data.
     fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64>;
+    /// Returns a mutable reference to a convolution channel's deltas.
+    fn get_deltas_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64>;
     /// Returns a reference to the convolution result.
     fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>>;
     /// Returns a reference to the field with growth function applied.
@@ -637,8 +654,22 @@ pub trait Lenia {
     fn weights(&self, channel: usize) -> &[f64];
     /// Calculates the next state of the `Lenia` instance, and updates the data in channels accordingly.
     fn iterate(&mut self);
+    /// Set the `ChannelMode` of the specified `channel`.
+    fn set_channel_mode(&mut self, channel: usize, mode: ChannelMode);
+    /// Returns the `ChannelMode` of the specified `channel`.
+    fn get_channel_mode(&self, channel: usize) -> Option<ChannelMode>;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ChannelMode {
+    Positive,
+    Negative,
+    Fullrange,
+    Activation,
+    DeltaPositive,
+    DeltaNegative,
+    DeltaFullrange,
+}
 
 #[derive(Clone, Debug)]
 /// The `Channel` struct is a wrapper for holding the data of a single channel in a 
@@ -649,8 +680,8 @@ pub struct Channel {
     pub field: ndarray::ArrayD<f64>,
     pub weights: Vec<f64>,
     pub weight_sum_reciprocal: f64,
+    pub mode: ChannelMode,
 }
-
 
 #[derive(Clone)]
 /// The `ConvolutionChannel` struct holds relevant data for the convolution step of the

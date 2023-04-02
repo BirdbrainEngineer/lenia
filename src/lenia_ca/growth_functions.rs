@@ -76,13 +76,23 @@ pub fn multimodal_normal_inverted(num: f64, params: &[f64]) -> f64 {
 /// 
 /// * `params[0..n]` - Distribution to sample from
 pub fn precalculated_linear(num: f64, params: &[f64]) -> f64 {
-    let delta = 1.0 / params.len() as f64;
-    let sample = num / delta;
-    let a = params[sample.floor() as usize];
-    let b = params[sample.ceil() as usize];
-    let x_offset = sample - sample.floor();
-    let y_offset = b - a;
-    a + (y_offset * x_offset)
+    let index = num * params.len() as f64;
+    if index.abs() as usize >= (params.len() - 1) { return params[params.len() - 1] }
+    let a = params[index.abs().floor() as usize];
+    let b = params[index.abs().ceil() as usize];
+    let dx = index - index.floor();
+    let dy = b - a;
+    a + (dx * dy)
+}
+
+pub fn precalculated_linear_fullrange(num: f64, params: &[f64]) -> f64 {
+    let index = ((num + 1.0) * params.len() as f64) * 0.5;
+    if index.abs() as usize >= (params.len() - 1) { return params[params.len() - 1] }
+    let a = params[index.abs().floor() as usize];
+    let b = params[index.abs().ceil() as usize];
+    let dx = index - index.floor();
+    let dy = b - a;
+    a + (dx * dy)
 }
 
 /// Conway's "Game of life" growth function. `Rulestring: B3/S23`
@@ -94,9 +104,9 @@ pub fn conway_game_of_life(num: f64, params: &[f64]) -> f64 {
 }
 
 /// Returns `num`. Use this growth function if you would like to not use a growth function, 
-/// but merely explore the dynamics of iterative application of kernels. 
+/// but merely explore the dynamics of iterative application of kernels. `num` gets multiplied by `params[0]`
 pub fn pass(num: f64, params: &[f64]) -> f64 {
-    num
+    num * params[0]
 }
 
 pub struct Distributions {
@@ -104,7 +114,7 @@ pub struct Distributions {
 }
 
 impl Distributions {
-    pub fn geometric_normal(
+    pub fn geometric_normals(
         mu0: f64, 
         sigma0: f64, 
         peak0: f64, 
@@ -112,15 +122,14 @@ impl Distributions {
         ratio_sigma: f64, 
         ratio_peak: f64, 
         num_peaks: usize, 
-        distribution_length: usize) 
-        -> Vec<f64>
+        distribution_length: usize) -> Vec<f64> 
     {
         let mut distribution = vec![0.0; distribution_length];
         let delta = 1.0 / distribution_length as f64;
         let mut mu = mu0;
         let mut sigma = sigma0;
         let mut peak = peak0;
-        for _ in (0..num_peaks - 1) {
+        for _ in 0..(num_peaks - 1) {
             for i in 0..distribution_length {
                 distribution[i] += peak * super::sample_normal(i as f64 * delta, mu, sigma);
             }
@@ -131,6 +140,26 @@ impl Distributions {
         for i in 0..distribution_length {
             distribution[i] += peak * super::sample_normal(i as f64 * delta, mu, sigma);
             distribution[i] = (distribution[i] * 2.0) - 1.0;
+        }
+        distribution
+    }
+
+    pub fn multi_gaussian(
+        means: &[f64],
+        sigmas: &[f64],
+        peaks: &[f64],
+        distribution_length: usize ) -> Vec<f64> 
+    {
+        let mut distribution = vec![0.0; distribution_length];
+        for i in 0..distribution_length {
+            let mut sum = 0.0;
+            let num = i as f64 * (1.0 / distribution_length as f64);
+            for j in 0..means.len() {
+                sum += peaks[j] * super::sample_normal(num, means[j], sigmas[j]);
+            }
+            distribution[i] = sum * 2.0;
+            if distribution[i] >= 0.0 { distribution[i] -= 1.0; }
+            else { distribution[i] += 1.0; }
         }
         distribution
     }

@@ -7,6 +7,7 @@ use std::ops::IndexMut;
 
 use super::*;
 use ndarray::IxDyn;
+use rustfft::num_traits::pow;
 
 /// Creates the kernel base for a gaussian donut in 2d. 
 /// The mean (position of the highest value) is placed at `0.5`
@@ -184,6 +185,68 @@ pub fn multi_gaussian_donut_nd(diameter: usize, dimensions: usize, means: &[f64]
     out
 }
 
+pub fn exponential_donuts(diameter: usize, dimensions: usize, means: &[f64], peaks: &[f64], exponents: &[f64]) -> ndarray::ArrayD<f64> {
+    let radius = diameter as f64 / 2.0;
+    let normalizer = 1.0 / radius;
+    let center = vec![radius; dimensions];
+    let mut shape: Vec<usize> = Vec::new();
+    let mut index: Vec<f64> = Vec::new();
+    for i in 0..dimensions {
+        shape.push(diameter);
+        index.push(0.0);
+    }
+    let out = ndarray::ArrayD::from_shape_fn(
+        shape, 
+        |index_info| {
+            for i in 0..index.len() {
+                index[i] = index_info[i] as f64;
+            }
+            let mut dist = euclidean_dist(&index, &center);
+            if dist > radius {
+                0.0
+            }
+            else {
+                dist *= normalizer;
+                let mut sum = 0.0;
+                for i in 0..means.len() {
+                    sum += super::sample_exponential((dist - means[i]).abs(), exponents[i], peaks[i]);
+                }
+                sum
+            }
+        }
+    );
+    out
+}
+
+pub fn inverse_distance_bump(diameter: usize, dimensions: usize, peak: f64, exponent: f64) -> ndarray::ArrayD<f64> {
+    let radius = diameter as f64 / 2.0;
+    let normalizer = 1.0 / radius;
+    let center = vec![radius; dimensions];
+    let mut shape: Vec<usize> = Vec::new();
+    let mut index: Vec<f64> = Vec::new();
+    for i in 0..dimensions {
+        shape.push(diameter);
+        index.push(0.0);
+    }
+    let out = ndarray::ArrayD::from_shape_fn(
+        shape, 
+        |index_info| {
+            for i in 0..index.len() {
+                index[i] = index_info[i] as f64;
+            }
+            let mut dist = euclidean_dist(&index, &center);
+            if dist > radius {
+                0.0
+            }
+            else {
+                dist *= normalizer;
+                -(peak * dist.powf(exponent) + peak)
+            }
+        }
+    );
+    out
+}
+
 /// Moore neighborhood with radius of 1. 
 /// 
 /// This is the kernel to use for Conway's game of life. 
@@ -200,6 +263,15 @@ pub fn empty(shape: &[usize]) -> ndarray::ArrayD<f64> {
         unit_shape.push(1);
     }
     ndarray::ArrayD::<f64>::zeros(unit_shape)
+}
+
+/// Gives a kernel the size of 1 unit containing `1.0`, but with as many dimensions as `shape`.
+pub fn pass(shape: &[usize]) -> ndarray::ArrayD<f64> {
+    let mut unit_shape: Vec<usize> = Vec::new();
+    for _ in shape {
+        unit_shape.push(1);
+    }
+    ndarray::ArrayD::<f64>::from_shape_fn(unit_shape, |a| { 1.0 })
 }
 
 fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
