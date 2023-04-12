@@ -498,7 +498,7 @@ impl Lenia for ExpandedLenia {
                     ConvolutionChannel { 
                         input_channel: 0, 
                         field: self.conv_channels[0].field.clone(), 
-                        kernel: Kernel::from(kernels::empty(&self.shape), &self.shape), 
+                        kernel: Kernel::from(kernels::pass(&self.shape), &self.shape), 
                         growth: growth_functions::pass, 
                         growth_params: vec![0.0],
                     }

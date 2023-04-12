@@ -23,8 +23,9 @@ use rustfft::num_traits::pow;
 /// 
 /// ### Returns
 /// A 2d array (`ndarray::ArrayD`) of `f64` values.
-pub fn gaussian_donut_2d(diameter: usize, stddev: f64) -> ndarray::ArrayD<f64> {
-    let radius = diameter as f64 / 2.0;
+pub fn gaussian_donut_2d(radius: usize, stddev: f64) -> ndarray::ArrayD<f64> {
+    let diameter = radius * 2;
+    let radius = radius as f64;
     let normalizer = 1.0 / radius;
     let mut out = ndarray::ArrayD::zeros(IxDyn(&[diameter, diameter]));
     let x0 = radius;
@@ -64,11 +65,12 @@ pub fn gaussian_donut_2d(diameter: usize, stddev: f64) -> ndarray::ArrayD<f64> {
 /// 
 /// ### Returns
 /// 2d array (`ndarray::ArrayD`) of `f64` values.
-pub fn multi_gaussian_donut_2d(diameter: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
+pub fn multi_gaussian_donut_2d(radius: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
     if means.len() != peaks.len() || means.len() != stddevs.len() {
         panic!("Function \"multi_gaussian_donut_2d\" expects each mean parameter to be accompanied by a peak and stddev parameter!");
     }
-    let radius = diameter as f64 / 2.0;
+    let diameter = radius * 2;
+    let radius = radius as f64;
     let normalizer = 1.0 / radius;
     let mut out = ndarray::ArrayD::zeros(IxDyn(&[diameter, diameter]));
     let x0 = radius;
@@ -106,14 +108,14 @@ pub fn multi_gaussian_donut_2d(diameter: usize, means: &[f64], peaks: &[f64], st
 /// 
 /// ### Returns
 /// An n-dimensional array (`ndarray::ArrayD`) of `f64` values.
-pub fn gaussian_donut_nd(diameter: usize, dimensions: usize, stddev: f64) -> ndarray::ArrayD<f64> {
-    let radius = diameter as f64 / 2.0;
+pub fn gaussian_donut_nd(radius: usize, dimensions: usize, stddev: f64) -> ndarray::ArrayD<f64> {
+    let radius = radius as f64;
     let normalizer = 1.0 / radius;
     let center = vec![radius; dimensions];
     let mut shape: Vec<usize> = Vec::new();
     let mut index: Vec<f64> = Vec::new();
     for i in 0..dimensions {
-        shape.push(diameter);
+        shape.push((radius * 2.0) as usize);
         index.push(0.0);
     }
     let out = ndarray::ArrayD::from_shape_fn(
@@ -153,14 +155,14 @@ pub fn gaussian_donut_nd(diameter: usize, dimensions: usize, stddev: f64) -> nda
 /// 
 /// ### Returns
 /// An n-dimensional array (`ndarray::ArrayD`) of `f64` values.
-pub fn multi_gaussian_donut_nd(diameter: usize, dimensions: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
-    let radius = diameter as f64 / 2.0;
+pub fn multi_gaussian_donut_nd(radius: usize, dimensions: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
+    let radius = radius as f64;
     let normalizer = 1.0 / radius;
     let center = vec![radius; dimensions];
     let mut shape: Vec<usize> = Vec::new();
     let mut index: Vec<f64> = Vec::new();
     for i in 0..dimensions {
-        shape.push(diameter);
+        shape.push((radius * 2.0) as usize);
         index.push(0.0);
     }
     let out = ndarray::ArrayD::from_shape_fn(
@@ -185,14 +187,14 @@ pub fn multi_gaussian_donut_nd(diameter: usize, dimensions: usize, means: &[f64]
     out
 }
 
-pub fn exponential_donuts(diameter: usize, dimensions: usize, means: &[f64], peaks: &[f64], exponents: &[f64]) -> ndarray::ArrayD<f64> {
-    let radius = diameter as f64 / 2.0;
+pub fn exponential_donuts(radius: usize, dimensions: usize, means: &[f64], peaks: &[f64], exponents: &[f64]) -> ndarray::ArrayD<f64> {
+    let radius = radius as f64;
     let normalizer = 1.0 / radius;
     let center = vec![radius; dimensions];
     let mut shape: Vec<usize> = Vec::new();
     let mut index: Vec<f64> = Vec::new();
     for i in 0..dimensions {
-        shape.push(diameter);
+        shape.push((radius * 2.0) as usize);
         index.push(0.0);
     }
     let out = ndarray::ArrayD::from_shape_fn(
@@ -218,14 +220,14 @@ pub fn exponential_donuts(diameter: usize, dimensions: usize, means: &[f64], pea
     out
 }
 
-pub fn inverse_distance_bump(diameter: usize, dimensions: usize, peak: f64, exponent: f64) -> ndarray::ArrayD<f64> {
-    let radius = diameter as f64 / 2.0;
+pub fn inverse_distance_bump(radius: usize, dimensions: usize, peak: f64, exponent: f64) -> ndarray::ArrayD<f64> {
+    let radius = radius as f64;
     let normalizer = 1.0 / radius;
     let center = vec![radius; dimensions];
     let mut shape: Vec<usize> = Vec::new();
     let mut index: Vec<f64> = Vec::new();
     for i in 0..dimensions {
-        shape.push(diameter);
+        shape.push((radius * 2.0) as usize);
         index.push(0.0);
     }
     let out = ndarray::ArrayD::from_shape_fn(
@@ -247,7 +249,7 @@ pub fn inverse_distance_bump(diameter: usize, dimensions: usize, peak: f64, expo
     out
 }
 
-/// Moore neighborhood with radius of 1. 
+/// Moore neighborhood with radius of 1 in 2D. 
 /// 
 /// This is the kernel to use for Conway's game of life. 
 pub fn moore1() -> ndarray::ArrayD<f64> {
@@ -256,13 +258,32 @@ pub fn moore1() -> ndarray::ArrayD<f64> {
     out
 }
 
-/// Gives a kernel the size of 1 unit containing `0.0`, but with as many dimensions as `shape`.
-pub fn empty(shape: &[usize]) -> ndarray::ArrayD<f64> {
-    let mut unit_shape: Vec<usize> = Vec::new();
-    for _ in shape {
-        unit_shape.push(1);
-    }
-    ndarray::ArrayD::<f64>::zeros(unit_shape)
+/// Kernel for "SmoothLife" cellular automaton in any dimensionality. 
+/// 
+/// ###Parameters
+/// 
+/// * `radius` - Radius of the kernel to generate.
+/// 
+/// * `dimensions` - Dimensionality of the kernel to generate.
+/// 
+/// * `width_ratio` - Controls the width of the neighborhood ring around the center, where `0.0` is empty kernel
+/// and `1.0` is a completely filled in disk. Use `0.5` for default SmoothLife. 
+pub fn smoothlife(radius: usize, dimensions: usize, width_ratio: f64) -> ndarray::ArrayD<f64> {
+    let width_ratio = width_ratio.clamp(0.0, 1.0);
+    let center = vec![radius as f64; dimensions];
+    let shape = vec![radius * 2; dimensions];
+    let out = ndarray::ArrayD::from_shape_fn(shape, |index_info| {
+        let mut index = Vec::with_capacity(dimensions);
+        for i in 0..dimensions {
+            index.push(index_info[i] as f64);
+        }
+        let mut dist = euclidean_dist(&index, &center);
+        dist /= radius as f64;
+        if dist > (1.0 - ((1.0 - width_ratio) * 0.5)) { 0.0 }
+        else if dist < ((1.0 - width_ratio) * 0.5) { 0.0 }
+        else { 1.0 }
+    });
+    out
 }
 
 /// Gives a kernel the size of 1 unit containing `1.0`, but with as many dimensions as `shape`.

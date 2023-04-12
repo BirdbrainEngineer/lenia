@@ -25,16 +25,16 @@ fn main() {
     let mut checking_transformed = false;
     let mut checking_deltas = false;
     let mut z_depth = Z_SIDE_LEN/2;
-    let kernel_diameter = 80;
+    let kernel_diameter = 22;
     let mut kernel_z_depth = kernel_diameter / 2;
     let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
     let view_axis = [0, 1];
-    let fill_channels = vec![true, true, true, false, false, false, false, false];
+    let fill_channels = vec![true, false, false, false, false, false, false, false];
     let randomness_scalers = vec![0.75, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-    let randomness_sizes = vec![110, 100, 140, 50, 50, 50, 50, 50];
-    let randomness_patches = vec![7, 7, 7, 1, 1, 1, 1, 1, 1];
-    let view_channels: Vec<i32> = vec![1, 2, 3];
-    let dt = 0.04;
+    let randomness_sizes = vec![50, 100, 140, 50, 50, 50, 50, 50];
+    let randomness_patches = vec![20, 7, 7, 1, 1, 1, 1, 1, 1];
+    let view_channels: Vec<i32> = vec![1, 1, 1];
+    let dt = 1.0;
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
 
@@ -42,7 +42,13 @@ fn main() {
 
     lenia_simulator.set_channels(1);
     lenia_simulator.set_convolution_channels(1);
-    
+    lenia_simulator.set_convolution_channel_source(0, 0);
+
+    let smoothlifekernel = kernels::smoothlife(kernel_diameter, channel_shape.len(), 0.5);
+
+    lenia_simulator.set_kernel(smoothlifekernel.clone(), 0);
+    lenia_simulator.set_weights(0, &vec![1.0]);
+    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.31, 0.0495], 0);
 
     /*lenia_simulator.set_channels(4);
     lenia_simulator.set_channel_mode(0, lenia_ca::ChannelMode::Positive);
@@ -278,7 +284,7 @@ fn main() {
     lenia_simulator.set_dt(0.05);
     */
     //let kernel_3d_clone = lenia_ca::Kernel::from(lenia_ca::kernels::gaussian_donut_2d(kernel_diameter, 1.0/6.7), &channel_shape);
-    let kernel_3d_clone = lenia_ca::Kernel::from(multidonut2.clone(), &channel_shape);
+    let kernel_3d_clone = lenia_ca::Kernel::from(smoothlifekernel.clone(), &channel_shape);
     
     // Extended lenia test 2
     /*lenia_simulator.set_channels(3);
