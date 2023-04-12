@@ -77,7 +77,8 @@ pub fn multimodal_normal_inverted(num: f64, params: &[f64]) -> f64 {
 /// * `params[0..n]` - Distribution to sample from
 pub fn precalculated_linear(num: f64, params: &[f64]) -> f64 {
     let index = num * params.len() as f64;
-    if index.abs() as usize >= (params.len() - 1) { return params[params.len() - 1] }
+    if index as usize >= (params.len() - 1) { return params[params.len() - 1] }
+    if index as usize <= 0 { return params[0] }
     let a = params[index.abs().floor() as usize];
     let b = params[index.abs().ceil() as usize];
     let dx = index - index.floor();
@@ -85,9 +86,18 @@ pub fn precalculated_linear(num: f64, params: &[f64]) -> f64 {
     a + (dx * dy)
 }
 
+/// Samples from a precalculated distribution. The distribution is made of evenly spaced points from
+/// `-1.0` to `1.0`. In the likely event of the sample falling between 2 points in the distribution, 
+/// the result will be interpolated linearly between the two points.
+/// 
+/// ### Parameters
+/// * `num` - The input to evaluate against the growth function.
+/// 
+/// * `params[0..n]` - Distribution to sample from
 pub fn precalculated_linear_fullrange(num: f64, params: &[f64]) -> f64 {
     let index = ((num + 1.0) * params.len() as f64) * 0.5;
-    if index.abs() as usize >= (params.len() - 1) { return params[params.len() - 1] }
+    if index as usize >= (params.len() - 1) { return params[params.len() - 1] }
+    if index as usize <= 0 { return params[0] }
     let a = params[index.abs().floor() as usize];
     let b = params[index.abs().ceil() as usize];
     let dx = index - index.floor();

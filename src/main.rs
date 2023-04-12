@@ -19,47 +19,53 @@ const GAIN: f64 = 5000.0;
 fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
     let inv_scale = 1.0 / SCALE as f64;
+    let randomness_sizer = 0.5;
     let mut simulating = false;
     let mut checking_kernel = true;
     let mut checking_transformed = false;
     let mut checking_deltas = false;
     let mut z_depth = Z_SIDE_LEN/2;
-    let kernel_diameter = 120;
+    let kernel_diameter = 80;
     let mut kernel_z_depth = kernel_diameter / 2;
     let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
     let view_axis = [0, 1];
-    let fill_channels = vec![true, false, false, false, false, false, false, false];
-    let view_channels: Vec<i32> = vec![3, 4, -4];
+    let fill_channels = vec![true, true, true, false, false, false, false, false];
+    let randomness_scalers = vec![0.75, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+    let randomness_sizes = vec![110, 100, 140, 50, 50, 50, 50, 50];
+    let randomness_patches = vec![7, 7, 7, 1, 1, 1, 1, 1, 1];
+    let view_channels: Vec<i32> = vec![1, 2, 3];
     let dt = 0.04;
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
 
     //let input_kernel = lenia_ca::load_from_png("/home/clanga/Documents/Programming/lenia_simulator/inputs/kernel_ac.png");
 
-    lenia_simulator.set_channels(4);
-    lenia_simulator.set_channel_mode(0, lenia_ca::ChannelMode::Positive);
-    lenia_simulator.set_channel_mode(1, lenia_ca::ChannelMode::DeltaPositive);
-    lenia_simulator.set_channel_mode(2, lenia_ca::ChannelMode::DeltaFullrange);
-    lenia_simulator.set_channel_mode(3, lenia_ca::ChannelMode::DeltaFullrange);
+    lenia_simulator.set_channels(1);
+    lenia_simulator.set_convolution_channels(1);
+    
 
+    /*lenia_simulator.set_channels(4);
+    lenia_simulator.set_channel_mode(0, lenia_ca::ChannelMode::Positive);
+    lenia_simulator.set_channel_mode(1, lenia_ca::ChannelMode::Positive);
+    lenia_simulator.set_channel_mode(2, lenia_ca::ChannelMode::Positive);
+    lenia_simulator.set_channel_mode(3, lenia_ca::ChannelMode::Positive);
 
     lenia_simulator.set_convolution_channels(4);
     lenia_simulator.set_convolution_channel_source(0, 0);
-    lenia_simulator.set_convolution_channel_source(1, 0);
-    lenia_simulator.set_convolution_channel_source(2, 1);
-    lenia_simulator.set_convolution_channel_source(3, 2);
+    lenia_simulator.set_convolution_channel_source(1, 1);
+    lenia_simulator.set_convolution_channel_source(2, 2);
+    lenia_simulator.set_convolution_channel_source(3, 3);
 
 
-    lenia_simulator.set_weights(0, &vec![1.0, 0.0, 0.0, 0.0]);
-    lenia_simulator.set_weights(1, &vec![0.0, 1.0, 0.0, 0.0]);
-    lenia_simulator.set_weights(2, &vec![0.0, 0.0, 1.0, 0.0]);
-    lenia_simulator.set_weights(3, &vec![0.0, 0.0, -1.0, 1.0]);
-
+    lenia_simulator.set_weights(0, &vec![1.0, 0.25, 0.5, 0.2]);
+    lenia_simulator.set_weights(1, &vec![0.5, 1.0, 0.25, 0.2]);
+    lenia_simulator.set_weights(2, &vec![0.25, 0.5, 1.0, 0.2]);
+    lenia_simulator.set_weights(3, &vec![1.0, 1.0, 1.0, 0.0]);
 
     let mut growth_top = lenia_ca::growth_functions::Distributions::multi_gaussian(
-        &vec![0.15], 
-        &vec![0.017], 
-        &vec![1.0], 
+        &vec![0.12, 0.27], 
+        &vec![0.007, 0.033], 
+        &vec![1.0, 1.0], 
         10000
     );
     let mut growth_main = Vec::new();
@@ -81,18 +87,39 @@ fn main() {
     let pass = lenia_ca::kernels::pass(lenia_simulator.shape());
     let inverse_distance = lenia_ca::kernels::inverse_distance_bump(kernel_diameter / 4, lenia_simulator.shape().len(), 1.0, 2.0);
     let donut = lenia_ca::kernels::gaussian_donut_2d(kernel_diameter, 1.0/6.7);
+    let multidonut = kernels::multi_gaussian_donut_nd(
+        kernel_diameter, 
+        2, 
+        &vec![0.25, 0.5, 0.75], 
+        &vec![1.0, 0.5, 0.75], 
+        &vec![1.0/19.0, 1.0/19.0, 1.0/19.0],
+    );
+    let multidonut2 = kernels::multi_gaussian_donut_nd(
+        kernel_diameter + 40, 
+        2, 
+        &vec![0.15, 0.27, 0.44, 0.6, 0.75], 
+        &vec![0.25, 0.88, 0.5, 0.7, 1.0], 
+        &vec![1.0/17.0, 1.0/28.0, 1.0/27.0, 1.0/32.0, 1.0/23.0],
+    );
+    let multidonut3 = kernels::multi_gaussian_donut_nd(
+        kernel_diameter - 20, 
+        2, 
+        &vec![0.15, 0.44, 0.75], 
+        &vec![0.5, 1.0, 0.5], 
+        &vec![1.0/19.0, 1.0/17.0, 1.0/17.0],
+    );
     let diffuse = lenia_ca::kernels::multi_gaussian_donut_2d(kernel_diameter / 2, &vec![0.0], &vec![1.0], &vec![0.4]);
-    let donut_propagation = lenia_ca::kernels::gaussian_donut_2d(kernel_diameter / 2, 1.0/6.7);
-    lenia_simulator.set_kernel(donut.clone(), 0);
-    lenia_simulator.set_kernel(donut.clone(), 1);
-    lenia_simulator.set_kernel(diffuse.clone(), 2);
-    lenia_simulator.set_kernel(donut_propagation.clone(), 3);
+    let donut_propagation = lenia_ca::kernels::gaussian_donut_2d(kernel_diameter / 4, 1.0/6.7);
+    lenia_simulator.set_kernel(multidonut.clone(), 0);
+    lenia_simulator.set_kernel(multidonut3.clone(), 1);
+    lenia_simulator.set_kernel(multidonut2.clone(), 2);
+    lenia_simulator.set_kernel(pass, 3);
 
     lenia_simulator.set_growth_function(lenia_ca::growth_functions::precalculated_linear_fullrange, growth_main.clone(), 0);
-    lenia_simulator.set_growth_function(lenia_ca::growth_functions::precalculated_linear_fullrange, growth_main.clone(), 1);
-    lenia_simulator.set_growth_function(lenia_ca::growth_functions::pass, vec![1.0], 2);
-    lenia_simulator.set_growth_function(lenia_ca::growth_functions::pass, vec![1.0], 3);
-     
+    lenia_simulator.set_growth_function(lenia_ca::growth_functions::standard_lenia, vec![0.22, 0.036], 1);
+    lenia_simulator.set_growth_function(lenia_ca::growth_functions::multimodal_normal, vec![0.08, 0.0022, 0.37, 0.078, 0.61, 0.02], 2);
+    lenia_simulator.set_growth_function(lenia_ca::growth_functions::pass, vec![-1.0], 3);
+    */     
 
     /*lenia_simulator.set_convolution_channels(7);
     lenia_simulator.set_channels(3);
@@ -250,8 +277,8 @@ fn main() {
     
     lenia_simulator.set_dt(0.05);
     */
-    let kernel_3d_clone = lenia_ca::Kernel::from(lenia_ca::kernels::gaussian_donut_2d(kernel_diameter, 1.0/6.7), &channel_shape);
-    //let kernel_3d_clone = lenia_ca::Kernel::from(inverse_distance.clone(), &channel_shape);
+    //let kernel_3d_clone = lenia_ca::Kernel::from(lenia_ca::kernels::gaussian_donut_2d(kernel_diameter, 1.0/6.7), &channel_shape);
+    let kernel_3d_clone = lenia_ca::Kernel::from(multidonut2.clone(), &channel_shape);
     
     // Extended lenia test 2
     /*lenia_simulator.set_channels(3);
@@ -342,21 +369,14 @@ fn main() {
 
         match keyboardstate.character {
             'r' => {
-                let num_patches;
-                if X_SIDE_LEN / kernel_diameter > 20 { num_patches = 20; }
-                else { num_patches = X_SIDE_LEN / kernel_diameter; }
-                let size;
-                if kernel_diameter < X_SIDE_LEN / 15 { size = X_SIDE_LEN / 15; }
-                else { size = kernel_diameter - kernel_diameter / 3; }
-                let scaler = 0.75;
                 let mut data;
                 for i in 0..lenia_simulator.channels() {
                     if fill_channels[i] {
                         data = lenia_ca::seeders::random_hypercubic_patches(
                             lenia_simulator.shape(), 
-                            size, 
-                            num_patches, 
-                            scaler, 
+                            randomness_sizes[i], 
+                            randomness_patches[i], 
+                            randomness_scalers[i], 
                             false
                         );
                         lenia_simulator.fill_channel(&data, i);
@@ -473,8 +493,8 @@ fn main() {
                     let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
                     unsafe {
                         pixel.r = (frames[0].uget([coords.0, coords.1]) * 255.0) as u8;
-                        pixel.g = (frames[1].uget([coords.0, coords.1]) * 255.0) as u8;
-                        pixel.b = (frames[2].uget([coords.0, coords.1]) * 255.0) as u8;
+                        pixel.g = ((frames[1].uget([coords.0, coords.1]) * 255.0) as u16 + 0 as u16).clamp(0, 255) as u8;
+                        pixel.b = ((frames[2].uget([coords.0, coords.1]) * 255.0) as u16 + 0 as u16).clamp(0, 255) as u8;
                     }
                 }
             }
