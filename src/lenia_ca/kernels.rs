@@ -249,6 +249,78 @@ pub fn inverse_distance_bump(radius: usize, dimensions: usize, peak: f64, expone
     out
 }
 
+pub fn precalculated_linear(radius: usize, dimensions: usize, params: &[f64]) -> ndarray::ArrayD<f64> {
+    let radius = radius as f64;
+    let normalizer = 1.0 / radius;
+    let center = vec![radius; dimensions];
+    let mut shape: Vec<usize> = Vec::new();
+    let mut index: Vec<f64> = Vec::new();
+    for i in 0..dimensions {
+        shape.push((radius * 2.0) as usize);
+        index.push(0.0);
+    }
+    let out = ndarray::ArrayD::from_shape_fn(
+        shape, 
+        |index_info| {
+            for i in 0..index.len() {
+                index[i] = index_info[i] as f64;
+            }
+            let dist = euclidean_dist(&index, &center);
+            if dist > radius {
+                0.0
+            }
+            else {
+                growth_functions::precalculated_linear(dist * normalizer, params)
+            }
+        }
+    );
+    out
+}
+
+/// params[0] = polynomial power
+/// params[1..n] = peak heights
+pub fn polynomial_nd(radius: usize, dimensions: usize, params: &[f64]) -> ndarray::ArrayD<f64> {
+    let radius = radius as f64;
+    let normalizer = 1.0 / radius;
+    let center = vec![radius; dimensions];
+    let mut shape: Vec<usize> = Vec::new();
+    let mut index: Vec<f64> = Vec::new();
+    for i in 0..dimensions {
+        shape.push((radius * 2.0) as usize);
+        index.push(0.0);
+    }
+    let out = ndarray::ArrayD::from_shape_fn(
+        shape, 
+        |index_info| {
+            for i in 0..index.len() {
+                index[i] = index_info[i] as f64;
+            }
+            let dist = euclidean_dist(&index, &center);
+            if dist > radius {
+                0.0
+            }
+            else {
+                let dist = dist * normalizer;
+                if dist == 0.0 { 0.0 }
+                else {
+                    let peak_index = (dist * (params.len() - 1) as f64).ceil() as usize;
+                    params[peak_index] * c((params.len() - 1) as f64 * dist - (peak_index - 1) as f64, params[0])
+                }
+            }
+        }
+    );
+    out
+}
+
+fn c(r: f64, alpha: f64) -> f64 {
+    let num = 4.0 * r * (1.0 - r);
+    let mut out = 1.0;
+    for _ in 0..(alpha as usize) {
+        out *= num;
+    }
+    out
+}
+
 /// Moore neighborhood with radius of 1 in 2D. 
 /// 
 /// This is the kernel to use for Conway's game of life. 
@@ -295,7 +367,7 @@ pub fn pass(shape: &[usize]) -> ndarray::ArrayD<f64> {
     ndarray::ArrayD::<f64>::from_shape_fn(unit_shape, |a| { 1.0 })
 }
 
-fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
+pub fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
     let mut out: f64 = 0.0;
     for i in 0..a.len() {
         out += (a[i] - b[i]) * (a[i] - b[i]);

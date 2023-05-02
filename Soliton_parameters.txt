@@ -1,0 +1,87 @@
+Tetrahedrome rotans {
+    lenia_simulator.set_channels(1);
+    lenia_simulator.set_convolution_channels(1);
+    lenia_simulator.set_convolution_channel_source(0, 0);
+    let kernel3d = kernels::polynomial_nd(30, 3, &vec![4.0, 1.0, 5.0/12.0]);
+    lenia_simulator.set_kernel(kernel3d.clone(), 0);
+    lenia_simulator.set_weights(0, &vec![1.0]);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.17, 0.014, 4.0], 0);
+}
+Hexahedrome rotans {
+    lenia_simulator.set_channels(1);
+    lenia_simulator.set_convolution_channels(1);
+    lenia_simulator.set_convolution_channel_source(0, 0);
+    let kernel3d = kernels::polynomial_nd(kernel_radius, channel_shape.len(), &vec![4.0, 1.0, 5.0/12.0]);
+    lenia_simulator.set_kernel(kernel3d.clone(), 0);
+    lenia_simulator.set_weights(0, &vec![1.0]);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.17, 0.014, 4.0], 0);
+}
+
+4d complex {
+    lenia_simulator.set_channels(2);
+    lenia_simulator.set_convolution_channels(4);
+    lenia_simulator.set_convolution_channel_source(0, 0);
+    lenia_simulator.set_convolution_channel_source(1, 1);
+    lenia_simulator.set_convolution_channel_source(2, 1);
+    lenia_simulator.set_convolution_channel_source(3, 0);
+    let kernel3d = kernels::polynomial_nd(kernel_radius, channel_shape.len(), &vec![4.0, 1.0, 1.0/12.0, 1.0/24.0]);
+    let kernel3d_2 = kernels::polynomial_nd(kernel_radius, channel_shape.len(), &vec![4.0, 1.0/24.0, 1.0/12.0, 1.0]);
+    let kernel3d_3 = kernels::gaussian_donut_nd(kernel_radius, 4, 1.0/6.7);
+    let kernel3d_4 = kernels::polynomial_nd(kernel_radius, channel_shape.len(), &vec![3.0, 0.0, 1.0]);
+    lenia_simulator.set_kernel(kernel3d.clone(), 0);
+    lenia_simulator.set_kernel(kernel3d_2.clone(), 1);
+    lenia_simulator.set_kernel(kernel3d_4.clone(), 2);
+    lenia_simulator.set_kernel(kernel3d_4.clone(), 3);
+    lenia_simulator.set_weights(0, &vec![1.0, 0.0, 0.5, 0.0]);
+    lenia_simulator.set_weights(1, &vec![0.0, 1.0, 0.0, 1.0]);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.22, 0.042, 4.0], 0);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.13, 0.021, 4.0], 1);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.15, 0.015, 4.0], 2);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.15, 0.041, 4.0], 3);
+}
+
+Some interesting stuff {
+    lenia_simulator.set_channels(2);
+    lenia_simulator.set_convolution_channels(5);
+    lenia_simulator.set_convolution_channel_source(0, 0);
+    lenia_simulator.set_convolution_channel_source(1, 0);
+    lenia_simulator.set_convolution_channel_source(2, 0);
+    lenia_simulator.set_convolution_channel_source(3, 0);
+    lenia_simulator.set_convolution_channel_source(4, 1);
+    let kernel3d = kernels::polynomial_nd(kernel_radius, channel_shape.len(), &vec![4.0, 1.0, 0.5, 0.25]);
+    let kernel3d2 = kernels::polynomial_nd(kernel_radius, channel_shape.len(), &vec![4.0, 1.0/12.0, 1.0/6.0, 1.0, 1.0/12.0]);
+    let kernel3d3 = kernels::polynomial_nd(kernel_radius / 2, channel_shape.len(), &vec![4.0, 1.0]);
+    let kernel3d4 = kernels::polynomial_nd(kernel_radius / 4, channel_shape.len(), &vec![4.0, 1.0]);
+    lenia_simulator.set_kernel(kernel3d.clone(), 0);
+    lenia_simulator.set_kernel(kernel3d3.clone(), 1);
+    //lenia_simulator.set_kernel(kernels::pass(&channel_shape), 2);
+    lenia_simulator.set_kernel(kernel3d4.clone(), 2);
+    lenia_simulator.set_kernel(kernel3d4.clone(), 3);
+    lenia_simulator.set_kernel(kernel3d2.clone(), 4);
+    lenia_simulator.set_weights(0, &vec![1.0, 1.0, 0.0, 0.5]);
+    lenia_simulator.set_weights(1, &vec![0.0, 0.0, 1.0, 0.1]);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.15, 0.022, 4.0], 0);
+    //lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.27, 0.037], 0);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.27, 0.041, 4.0], 1);
+    lenia_simulator.set_growth_function(|x, _|{x * 0.3}, vec![1.0], 2);
+    lenia_simulator.set_growth_function(|x, _|{x-1.0}, vec![1.0], 3);
+    lenia_simulator.set_growth_function(|x, _|{-x}, vec![1.0], 4);
+    //println!("{}", growth_functions::polynomial(0.0, &vec![0.1, 0.083565, 4.0]));
+}
+
+//smoothlife with dt 1.0
+//let smoothlifekernel = kernels::smoothlife(kernel_diameter, channel_shape.len(), 1.0);
+//lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.31, 0.05], 0);
+
+SNAKES AND PARASITES{
+    growth_mu = [0.33120, 0.41836, 0.33820, 0.35382, 0.27262, 0.30208, 0.40632, 0.41285, 0.31769, 0.24270, 0.28062, 0.39380, 0.31280, 0.36900, 0.41430]
+    growth_sigma = [0.07308, 0.09769, 0.07269, 0.07615, 0.11464, 0.09561, 0.10418, 0.10867, 0.11303, 0.12204, 0.10378, 0.13541, 0.10040, 0.11660, 0.11205]
+    growth_amount = [0.52797, 0.55443, 0.42826, 0.59524, 0.42523, 0.40546, 0.47962, 0.44879, 0.48577, 0.44578, 0.39247, 0.61844, 0.42344, 0.42255, 0.36997]
+    kernel_radii = [0.778, 0.714, 0.755, 0.691, 0.713, 0.773, 0.696, 0.873, 0.691, 0.813, 0.682, 0.713, 0.803, 0.698, 0.790]
+    kernels0 = [1.000, 0.535, 0.528, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000]
+    kernels1 = [0.377, 1.000, 1.000, 0.526, 0.654, 0.437, 0.381, 0.613, 0.606, 0.502, 0.691, 0.396, 0.465, 0.552, 0.549]
+    kernels2 = [0.559, 0.535, 0.635, 0.388, 0.498, 0.678, 0.598, 0.381, 0.410, 0.414, 0.536, 0.356, 0.486, 0.401, 0.468]
+    kernel_rings = [1.0, 2.0, 2.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    sources = [0.0, 1.0, 2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0, 2.0, 1.0, 0.0, 1.0]
+    destinations = [0.0, 1.0, 2.0, 1.0, 2.0, 0.0, 2.0, 1.0, 1.0, 2.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+}

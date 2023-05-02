@@ -4,7 +4,8 @@
 /// A collection of initial randomness generators for the simulator.
 
 use super::*;
-use rand::Rng;
+use rand::{Rng, random};
+use rayon::prelude::IntoParallelRefMutIterator;
 
 /// Generates an n-dimensional field filled with `constant`.
 pub fn constant(shape: &[usize], constant: f64) -> ndarray::ArrayD<f64> {
@@ -32,6 +33,18 @@ pub fn random_uniform(shape: &[usize], scaler: f64, discrete: bool) -> ndarray::
         }
         else { 
             scaler * generator.gen::<f64>() 
+        }
+    })
+}
+
+pub fn random_quadratic(shape: &[usize], scaler: f64, discrete: bool) -> ndarray::ArrayD<f64> {
+    let mut generator = rand::thread_rng();
+    ndarray::ArrayD::from_shape_fn(shape, |_| {
+        if discrete { 
+            (((scaler + generator.gen::<f64>()).floor() * scaler + generator.gen::<f64>()).floor()).clamp(0.0, 1.0) 
+        }
+        else { 
+            scaler * generator.gen::<f64>() * scaler * generator.gen::<f64>()
         }
     })
 }
@@ -93,7 +106,7 @@ pub fn random_hypercubic(shape: &[usize], radius: usize, scaler: f64, discrete: 
 /// 
 /// ### Returns
 /// n-dimensional array (`ndarray::ArrayD`) of `f64` values, with the shape defined by `shape` parameter.
-pub fn random_hypercubic_patches(shape: &[usize], radius: usize, patches:usize, scaler:f64, discrete: bool) -> ndarray::ArrayD<f64> {
+pub fn random_hypercubic_patches(shape: &[usize], radius: usize, patches:usize, scaler:f64, discrete: bool, quadratic: bool) -> ndarray::ArrayD<f64> {
     let mut generator = rand::thread_rng();
     let mut buf: Vec<ndarray::ArrayD<f64>> = Vec::new();
     let mut cube_dims: Vec<usize> = Vec:: new();
@@ -107,7 +120,15 @@ pub fn random_hypercubic_patches(shape: &[usize], radius: usize, patches:usize, 
     }
     for _ in 0..patches {
         let mut patch = ndarray::ArrayD::from_elem(shape, 0.0);
-        random_uniform(&cube_dims, scaler, discrete).assign_to(patch.slice_each_axis_mut(
+        let randomness;
+        if quadratic {
+            randomness = random_quadratic(&cube_dims, scaler, discrete);
+        }
+        else {
+            randomness = random_uniform(&cube_dims, scaler, discrete);
+        }
+        
+        randomness.assign_to(patch.slice_each_axis_mut(
             |a| {
                 let randindex = generator.gen_range(0..(a.len - cube_dims[a.axis.index()]));
                 ndarray::Slice {
@@ -129,3 +150,59 @@ pub fn random_hypercubic_patches(shape: &[usize], radius: usize, patches:usize, 
     }
     out
 }
+
+pub fn random_hyperspheres(shape: &[usize], radius: usize, spheres:usize, scaler:f64, discrete: bool, quadratic: bool) -> ndarray::ArrayD<f64> {
+    let mut generator = rand::thread_rng();
+    let mut buf: Vec<ndarray::ArrayD<f64>> = Vec::new();
+    let mut cube_dims: Vec<usize> = Vec:: new();
+    for dim in shape {
+        if *dim < (radius * 2) {
+            cube_dims.push(*dim - 2);
+        }
+        else {
+            cube_dims.push(radius);
+        }
+    }
+    for _ in 0..spheres {
+        let mut patch = ndarray::ArrayD::from_elem(shape, 0.0);
+        let mut randomness;
+        if quadratic {
+            randomness = random_quadratic(&cube_dims, scaler, discrete);
+        }
+        else {
+            randomness = random_uniform(&cube_dims, scaler, discrete);
+        }
+        let center = vec![randomness.shape()[0] as f64 / 2.0; randomness.shape().len()];
+        let mut index: Vec<f64> = vec![0.0; randomness.shape().len()];
+        randomness.indexed_iter_mut().for_each(|(index_info, a)| {
+            for i in 0..index.len() {
+                index[i] = index_info[i] as f64;
+            }
+            let dist = kernels::euclidean_dist(&center, &index);
+            if dist > center[0] { *a = 0.0; }
+            else { *a = *a; }
+        });
+        
+        randomness.assign_to(patch.slice_each_axis_mut(
+            |a| {
+                let randindex = generator.gen_range(0..(a.len - cube_dims[a.axis.index()]));
+                ndarray::Slice {
+                    start: randindex as isize,
+                    end: Some((randindex + cube_dims[a.axis.index()]) as isize),
+                    step: 1,
+                }
+            }
+        ));
+        buf.push(patch);
+    }
+    let mut out = ndarray::ArrayD::from_elem(shape, 0.0);
+    for i in 0..spheres {
+        out.zip_mut_with(&buf[i], 
+            |a, b| { 
+                *a = (*a + *b).clamp(0.0, 1.0);
+            }
+        )
+    }
+    out
+}
+

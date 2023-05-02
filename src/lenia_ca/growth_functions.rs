@@ -50,6 +50,25 @@ pub fn multimodal_normal(num: f64, params: &[f64]) -> f64 {
     (sum * 2.0) - 1.0
 }
 
+///`params[0]` - mu
+/// 
+/// `params[1]` - sigma
+/// 
+/// `params[2]` - alpha
+pub fn polynomial(num: f64, params: &[f64]) -> f64 {
+    let l = (num - params[0]).abs();
+    let k = params[1] * 3.0;
+    if l > k { -1.0 }
+    else {
+        let a = 1.0 - ((l * l) / (k * k));
+        let mut out = 1.0;
+        for _ in 0..(params[2] as usize) {
+            out *= a;
+        }
+        (out * 2.0) - 1.0
+    }
+}
+
 /// Multimodal "gaussian bumps" growth function but inverted.
 /// 
 /// ### Parameters

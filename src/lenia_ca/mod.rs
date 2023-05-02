@@ -84,6 +84,10 @@ pub fn sample_exponential(x: f64, exponent: f64, peak: f64) -> f64 {
 /// 
 /// If the specified `channel` does not exist. 
 pub fn get_frame(output: &mut ndarray::Array2<f64>, input: &ndarray::ArrayD<f64>, display_axes: &[usize; 2], dimensions: &[usize]) {
+    if input.shape().len() == 2 {
+        ndarray::Zip::from(output).and(input.view().into_dimensionality::<ndarray::Ix2>().unwrap()).par_for_each(|a, b| { *a = *b; });
+        return;
+    }
     let data = input.slice_each_axis(
         |a|{
             if a.axis.index() == display_axes[0] || a.axis.index() == display_axes[1] {
@@ -568,6 +572,10 @@ impl<L: Lenia> Simulator<L> {
         self.sim.get_grown_as_ref(convolution_channel)
     }
 
+    pub fn get_kernel_as_ref(&self, convolution_channel: usize) -> &Kernel {
+        self.sim.get_kernel_as_ref(convolution_channel)
+    }
+
     /// Get the current integration step (a.k.a. timestep) parameter `dt` of the `Lenia` instance.
     pub fn dt(&self) -> f64 {
         self.sim.dt()
@@ -630,6 +638,8 @@ pub trait Lenia {
     fn set_weights(&mut self, new_weights: &[f64], channel: usize);
     /// Sets the dt parameter of the `Lenia` instance. 
     fn set_dt(&mut self, new_dt: f64);
+    /// Returns a reference to a convolution channel's kernel.
+    fn get_kernel_as_ref(&self, conv_channel: usize) -> &Kernel;
     /// Returns a reference to a channel's current data. 
     fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64>;
     /// Returns a mutable reference to a channel's current data.

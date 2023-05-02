@@ -163,6 +163,10 @@ impl Lenia for StandardLenia {
         &self.channel.field
     }
 
+    fn get_kernel_as_ref(&self, conv_channel: usize) -> &Kernel {
+        &self.conv_channel.kernel
+    }
+
     fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
         &mut self.channel.field
     }
@@ -224,34 +228,17 @@ pub struct ExpandedLenia {
     inverse_fft_instances: Vec<fft::ParPlannedFFTND>,
 }
 
-impl ExpandedLenia {
-    const DEFAULT_KERNEL_SIZE: usize = 28;
-}
-
 impl Lenia for ExpandedLenia {
     /// Create and initialize a new instance of "ExpandedLenia`. 
     fn new(shape: &[usize]) -> Self {
-        let mut max_kernel_diameter = Self::DEFAULT_KERNEL_SIZE;
-        for (i, dim) in shape.iter().enumerate() {
-            if *dim < max_kernel_diameter {
-                max_kernel_diameter = *dim;
-            }
-        }
-        let kernel = Kernel::from(
-            kernels::gaussian_donut_nd(
-                max_kernel_diameter, 
-                shape.len(),
-                1.0/6.7
-            ), 
-            shape
-        );
+        let kernel = Kernel::from(kernels::pass(shape), shape);
         
         let conv_channel = ConvolutionChannel {
             input_channel: 0,
             kernel: kernel,
             field: ndarray::ArrayD::from_elem(shape, 0.0),
-            growth: growth_functions::standard_lenia,
-            growth_params: vec![0.15, 0.017],
+            growth: growth_functions::pass,
+            growth_params: vec![1.0],
         };
 
         let channel = Channel {
@@ -562,7 +549,11 @@ impl Lenia for ExpandedLenia {
 
     fn get_channel_as_ref(&self, channel: usize) -> &ndarray::ArrayD<f64> {
         &self.channels[channel].field
-    } 
+    }
+
+    fn get_kernel_as_ref(&self, conv_channel: usize) -> &Kernel {
+        &self.conv_channels[conv_channel].kernel
+    }
 
     fn get_channel_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
         &mut self.channels[channel].field
