@@ -4,11 +4,17 @@ use std::{sync::mpsc::channel, ops::IndexMut};
 
 use ndarray::{ArrayD, IntoNdProducer};
 use std::{ops::Range, thread, sync::{Arc, Mutex}};
-use lenia_ca::{growth_functions, kernels, lenias::*, Channel, ChannelMode};
+use lenia_ca::{growth_functions, kernels, lenias::*, Channel};
 use pixel_canvas::{Canvas, Color, input};
 use probability::distribution;
 use rayon::{prelude::*, iter::empty};
 use rand::*;
+
+// Make sure to compile as release and run the release version - error checks make the program slow otherwise.
+// *If you have a beefy cpu then 1280x720 should run at or close to 60fps up to ~8 channels and kernels.
+// *Reduce X_SIDE_LEN and Y_SIDE_LEN if the simulation feels sluggish.
+// *SCALE magnifies the simulated board for render. Eg. if X and Y side lengths are
+// 1000x500, and SCALE is 2, then the created window for rendering will be 2000x1000 pixels.
 
 //const X_SIDE_LEN: usize = 1280;
 //const Y_SIDE_LEN: usize = 720;
@@ -26,11 +32,289 @@ const GROWTH_LOW: f64 = 0.05;
 const GROWTH_HIGH: f64 = 0.9;
 const RADIUS_RANGE: Range<f64> = 0.5..1.0;
 
-fn format_vec_f64(v: &Vec<f64>, decimal_digits: usize) -> String {
-    let formatted_nums: Vec<String> = v.iter().map(|num| format!("{:.1$}", num, decimal_digits)).collect();
-    let mut numbers = formatted_nums.join(", ");
-    numbers.insert(0, '[');
-    numbers + "]"
+fn main() {
+    std::env::set_var("RUST_BACKTRACE", "1");
+    let inv_scale = 1.0 / SCALE as f64;
+    let mut simulating = false;
+    let mut checking_kernel = true;
+    let mut checking_transformed = false;
+    let mut checking_deltas = false;
+    let mut z_depth = Z_SIDE_LEN/2;
+    let kernel_radius = 90;
+    let mut kernel_z_depth = kernel_radius / 2;
+    let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
+    let view_axis = [0, 1];
+    let fill_channels = vec![true, false, true, true, true, false, false, false];
+    let randomness_scalers = vec![0.5, 0.618, 0.618, 0.618, 0.618, 1.0, 1.0, 1.0];
+    let randomness_sizes = vec![150, 120, 120, 120, 120, 50, 50, 50];
+    let randomness_patches = vec![20, 20, 20, 20, 20, 1, 1, 1, 1];
+    let discrete_randomness = false;
+    let view_channels: Vec<i32> = vec![1, 1, 1];
+    let dt = 1.0;
+    let render_rate = 1;
+    let skip_frames = 1;
+    let capture_deltas = false;
+
+    let num_channels: usize = 3;
+    let num_convolutions: usize = 12;
+    let sigma_base = 0.15;
+    let max_rings = 2.0;
+    let maximum_adjust = 0.25;
+    let mut rules: Vec<Vec<f64>> = Vec::new();
+
+    let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
+    //lenia_simulator.set_kernel(kernels::smoothlife(15, 2, 0.8), 0);
+    //lenia_simulator.set_growth_function(growth_functions::smooth_life, vec![0.27, 0.36, 0.26, 0.46], 0);
+
+    //lenia_simulator.set_channels(2);
+    lenia_simulator.set_convolution_channels(2);
+    lenia_simulator.set_convolution_channel_source(1, 0);
+    lenia_simulator.set_growth_function(growth_functions::smooth_life_sigmoid_smoothed, vec![0.257, 0.336, 0.0, 0.01, 0.028, 0.2], 0);
+    lenia_simulator.set_growth_function(growth_functions::smooth_life_sigmoid_smoothed, vec![0.0, 0.01, 0.365, 0.549, 0.2, 0.147], 1);
+    lenia_simulator.set_kernel(kernels::smoothlife(13, 2, 0.5), 0);
+    lenia_simulator.set_kernel(kernels::smoothlife(4, 2, 1.0), 1);
+    //lenia_simulator.set_kernel(kernels::polynomial_nd(kernel_radius, 2, &vec![4.0, 1.0, 0.666, 0.333, 0.666]), 0);
+    //lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.16, 0.01], 0);
+    //lenia_simulator.set_kernel(kernels::polynomial_nd(kernel_radius, 2, &vec![4.0, 1.0, 0.666, 0.333, 0.666]), 1);
+    //lenia_simulator.set_growth_function(growth_functions::pass, vec![4.0], 1);
+    //lenia_simulator.set_channel_mode(1, ChannelMode::Activation);
+    lenia_simulator.set_weights(0, &vec![1.0, 1.0]);
+    //lenia_simulator.set_weights(1, &vec![0.0, 1.0]);
+    lenia_simulator.set_dt(0.1);
+
+    //let mut rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
+
+    
+    let mut frames: Vec<ndarray::Array2<f64>> = Vec::new();
+    for i_ in 0..3 {
+        frames.push(ndarray::Array2::zeros([lenia_simulator.shape()[view_axis[0]], lenia_simulator.shape()[view_axis[1]]]));
+    }
+    let empty_frame = frames[0].clone();
+    let mut frame_counter = 0;
+    let mut capture_counter = 0;
+    let mut frame_index = 0;
+    let mut continuous_capture = false;
+    let mut kernel_index: usize = 0;
+    
+    let canvas = Canvas::new(X_SIDE_LEN * SCALE, Y_SIDE_LEN * SCALE)
+        .title("Lenia")
+        .state(keyboardhandler::KeyboardState::new())
+        .input(keyboardhandler::KeyboardState::handle_input);
+
+
+    // More important key bindings
+    // k - toggles between viewing the kernels or simulation
+    // r - randomly seeds the simulation board based on constants earlier in the code
+    // s - toggles continuous simulating
+    // i - performs a single iteration of the simulation
+    //
+    // If using the code unchanged then the following are also important
+    // n - Changes the currently used rulesets completely
+    // m - Uses the currently set ruleset as basis and tweaks the ruleset slightly for a slightly different result
+    // , - Permanently tweaks the rulesets slightly from the currently used ruleset
+    canvas.render(move |keyboardstate, image| {
+
+        if simulating && continuous_capture {
+            if capture_counter >= skip_frames {
+                let density_handle = lenia_ca::export_frame_as_png(
+                    lenia_ca::BitDepth::Eight,
+                    lenia_simulator.get_channel_as_ref(0), 
+                    format!("{}", frame_index).as_str(), 
+                    &r"./output/density");
+                if capture_deltas {
+                    let delta_handle = lenia_ca::export_frame_as_png(
+                        lenia_ca::BitDepth::Eight,
+                        lenia_simulator.get_deltas_as_ref(0), 
+                        format!("{}", frame_index).as_str(), 
+                        &r"./output/delta");
+                    delta_handle.join().unwrap();
+                }
+                frame_index += 1;
+                density_handle.join().unwrap();
+                capture_counter = 0;
+            }
+            else {
+                capture_counter += 1;
+            }
+        }
+
+        match keyboardstate.character {
+            'r' => {
+                let mut data;
+                for i in 0..lenia_simulator.channels() {
+                    if fill_channels[i] {
+                        data = lenia_ca::seeders::random_hyperspheres(
+                            lenia_simulator.shape(), 
+                            randomness_sizes[i], 
+                            randomness_patches[i], 
+                            randomness_scalers[i], 
+                            discrete_randomness,
+                        );
+                        lenia_simulator.fill_channel(&data, i);
+                    }
+                    else {
+                        lenia_simulator.fill_channel(&lenia_ca::seeders::constant(lenia_simulator.shape(), 0.0), i);
+                    }
+                }
+            }
+            ',' => {
+                cumulate_lenia(&mut lenia_simulator, &mut rules, maximum_adjust, kernel_radius, sigma_base);
+            }
+            'n' => { 
+                rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
+            }
+            'm' => { adjust_lenia(&mut lenia_simulator, &rules, maximum_adjust, kernel_radius, sigma_base); }
+            'i' => { lenia_simulator.iterate(); }
+            's' => { simulating = !simulating; }
+            'k' => { checking_kernel = !checking_kernel; }
+            'x' => { kernel_index += if kernel_index + 1 == lenia_simulator.convolution_channels() {0} else {1};}
+            'z' => { kernel_index -= if kernel_index == 0 {0} else {1};}
+            '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.25); }
+            '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.0/1.25); }
+            '8' => { if z_depth != (Z_SIDE_LEN-1) { z_depth += 1 }; if kernel_z_depth != (kernel_radius-1) { kernel_z_depth += 1 }; println!("Depth: {}", z_depth); }
+            '2' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; println!("Depth: {}", z_depth); }
+            't' => { checking_transformed = !checking_transformed; }
+            'c' => { lenia_ca::export_frame_as_png(
+                    lenia_ca::BitDepth::Eight,
+                    lenia_simulator.get_channel_as_ref(0), 
+                    &"0", 
+                    &r"./output/density");
+                lenia_ca::export_frame_as_png(
+                    lenia_ca::BitDepth::Eight,
+                    lenia_simulator.get_deltas_as_ref(0), 
+                    &"0", 
+                    &r"./output/delta/"); 
+                if channel_shape.len() == 4 && lenia_simulator.channels() > 1 {
+                    lenia_ca::export_frame_as_png(
+                        lenia_ca::BitDepth::Eight,
+                        lenia_simulator.get_channel_as_ref(1), 
+                        &"0", 
+                        &r"./output/density2");
+                    lenia_ca::export_frame_as_png(
+                        lenia_ca::BitDepth::Eight,
+                        lenia_simulator.get_deltas_as_ref(1), 
+                        &"0", 
+                        &r"./output/delta2/"); 
+                }
+            }
+            'f' => {
+                continuous_capture = !continuous_capture;
+                capture_counter = 0;
+            }
+            'l' => {
+                for i in 0..lenia_simulator.channels() {
+                    let mut new_channel = lenia_simulator.get_channel_as_ref(i).clone();
+                    new_channel.invert_axis(ndarray::Axis(0));
+                    lenia_simulator.fill_channel(&new_channel, i);
+                }
+            }
+            'd' => {
+                checking_deltas = !checking_deltas;
+            }
+            _ => {}
+        }
+        keyboardstate.character = '\0';
+
+        let width = image.width() as usize;
+        let kernel_3d_clone = lenia_simulator.get_kernel_as_ref(kernel_index);
+        if checking_kernel {
+            if checking_transformed {
+                for (y, row) in image.chunks_mut(width).enumerate() {
+                    for (x, pixel) in row.iter_mut().enumerate() {
+                        if kernel_3d_clone.transformed.shape().len() == 2 {
+                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
+                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.g = 127;//(kernel_3d_clone.shifted[[coords.0, coords.1]] * 255.0) as u8;
+                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                        }
+                        else if kernel_3d_clone.transformed.shape().len() == 3 {
+                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
+                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.g = 127;
+                            //pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1, 0]] * 255.0 * GAIN) as u8;
+                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                        }
+                        else {
+                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
+                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth, z_depth]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                            pixel.g = 127;
+                            //pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1, 0]] * 255.0 * GAIN) as u8;
+                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth, z_depth]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
+                        }
+                    }
+                }
+            }
+            else {
+                for (y, row) in image.chunks_mut(width).enumerate() {
+                    row.into_par_iter().enumerate().for_each(|(x, pixel)| {
+                        let x_index = ((x as f64 / (SCALE * X_SIDE_LEN) as f64) * kernel_3d_clone.base.shape()[0] as f64) as usize;
+                        let y_index = ((y as f64 / (SCALE * Y_SIDE_LEN) as f64) * kernel_3d_clone.base.shape()[1] as f64) as usize;
+                        if kernel_3d_clone.base.shape().len() == 2 {
+                            pixel.r = (kernel_3d_clone.base[[x_index, y_index]] * 255.0) as u8;
+                        } 
+                        else if kernel_3d_clone.transformed.shape().len() == 3 {
+                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth]] * 255.0) as u8;
+                        }
+                        else {
+                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth, kernel_z_depth]] * 255.0) as u8;
+                        }
+                        pixel.g = pixel.r;
+                        pixel.b = pixel.r;
+                    });
+                }
+            }
+        }
+        else {
+            let channels = view_channels.clone();
+            frames.par_iter_mut().enumerate().for_each(|(i, frame)| {
+                let negative;
+                let mut view_channel = if channels[i] < 0 { 
+                        negative = true; 
+                        channels[i].abs() as usize 
+                    } 
+                    else { 
+                        negative = false; channels[i].abs() as usize 
+                    };
+                view_channel = if view_channel > lenia_simulator.channels() { 
+                        0
+                    } 
+                    else { 
+                        view_channel 
+                    };
+                if view_channel == 0 {
+                    *frame = empty_frame.clone();
+                }
+                else {
+                    if checking_deltas {
+                        lenia_ca::get_frame(lenia_simulator.get_deltas_as_ref(view_channel - 1), frame, &view_axis, &[0, 0, z_depth, z_depth]);
+                        frame.par_iter_mut().for_each(|a| { *a = (*a * 0.5) + 0.5 });
+                    }
+                    else {
+                        lenia_ca::get_frame(lenia_simulator.get_channel_as_ref(view_channel - 1), frame, &view_axis, &[0, 0, z_depth, z_depth]);
+                        if negative { frame.par_iter_mut().for_each(|a| { *a *= -1.0; }) }
+                    }
+                }
+            });
+
+            for (y, row) in image.chunks_mut(width).enumerate() {
+                row.par_iter_mut().enumerate().for_each(|(x, pixel)| {
+                    let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
+                    unsafe {
+                        pixel.r = (frames[0].uget([coords.0, coords.1]) * 255.0) as u8;
+                        pixel.g = ((frames[1].uget([coords.0, coords.1]) * 255.0) as u16 + 0 as u16).clamp(0, 255) as u8;
+                        pixel.b = ((frames[2].uget([coords.0, coords.1]) * 255.0) as u16 + 0 as u16).clamp(0, 255) as u8;
+                    }
+                });
+            }
+            if simulating {
+                frame_counter += 1;
+                if frame_counter >= render_rate {
+                    lenia_simulator.iterate();
+                    frame_counter = 0;
+                }  
+            }
+        }
+    });
 }
 
 fn new_lenia(
@@ -280,306 +564,9 @@ fn adjust_lenia(lenia_simulator: &mut lenia_ca::Simulator<ExpandedLenia>, ruleve
     }
 }
 
-fn main() {
-    std::env::set_var("RUST_BACKTRACE", "1");
-    let inv_scale = 1.0 / SCALE as f64;
-    let randomness_sizer = 0.5;
-    let mut simulating = false;
-    let mut checking_kernel = true;
-    let mut checking_transformed = false;
-    let mut checking_deltas = false;
-    let mut z_depth = Z_SIDE_LEN/2;
-    let kernel_radius = 50;
-    let mut kernel_z_depth = kernel_radius / 2;
-    let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
-    let view_axis = [0, 1];
-    let fill_channels = vec![true, true, true, true, true, false, false, false];
-    let randomness_scalers = vec![0.618, 0.618, 0.618, 0.618, 0.618, 1.0, 1.0, 1.0];
-    let randomness_sizes = vec![120, 120, 120, 120, 120, 50, 50, 50];
-    let randomness_patches = vec![20, 20, 20, 20, 20, 1, 1, 1, 1];
-    let view_channels: Vec<i32> = vec![1, 2, 3];
-    let dt = 1.0/10.0;
-    let render_rate = 1;
-    let skip_frames = 1;
-    let capture_deltas = false;
-    let quadratic_patches = false;
-
-    //let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
-
-    //let input_kernel = lenia_ca::load_from_png("/home/clanga/Documents/Programming/lenia_simulator/inputs/kernel_ac.png");
-
-    let num_channels: usize = 3;
-    let num_convolutions: usize = 12;
-    let sigma_base = 0.15;
-    let max_rings = 2.0;
-    let maximum_adjust = 0.25;
-
-    let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
-
-    let mut rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
-
-    let mut frames: Vec<ndarray::Array2<f64>> = Vec::new();
-    for i_ in 0..3 {
-        frames.push(ndarray::Array2::zeros([lenia_simulator.shape()[view_axis[0]], lenia_simulator.shape()[view_axis[1]]]));
-    }
-    let empty_frame = frames[0].clone();
-    let mut frame_counter = 0;
-    let mut capture_counter = 0;
-    let mut frame_index = 0;
-    let mut continuous_capture = false;
-    let mut kernel_index: usize = 0;
-    
-    let canvas = Canvas::new(X_SIDE_LEN * SCALE, Y_SIDE_LEN * SCALE)
-        .title("Lenia")
-        .state(keyboardhandler::KeyboardState::new())
-        .input(keyboardhandler::KeyboardState::handle_input);
-
-    canvas.render(move |keyboardstate, image| {
-
-        if simulating && continuous_capture {
-            if capture_counter >= skip_frames {
-                let density_handle = lenia_ca::export_frame_as_png(
-                    lenia_ca::BitDepth::Eight,
-                    lenia_simulator.get_channel_as_ref(0), 
-                    format!("{}", frame_index).as_str(), 
-                    &r"./output/density");
-                if capture_deltas {
-                    let delta_handle = lenia_ca::export_frame_as_png(
-                        lenia_ca::BitDepth::Eight,
-                        lenia_simulator.get_deltas_as_ref(0), 
-                        format!("{}", frame_index).as_str(), 
-                        &r"./output/delta");
-                    delta_handle.join().unwrap();
-                }
-                frame_index += 1;
-                density_handle.join().unwrap();
-                capture_counter = 0;
-            }
-            else {
-                capture_counter += 1;
-            }
-        }
-
-        match keyboardstate.character {
-            'r' => {
-                let mut data;
-                for i in 0..lenia_simulator.channels() {
-                    if fill_channels[i] {
-                        data = lenia_ca::seeders::random_hyperspheres(
-                            lenia_simulator.shape(), 
-                            randomness_sizes[i], 
-                            randomness_patches[i], 
-                            randomness_scalers[i], 
-                            false,
-                            quadratic_patches
-                        );
-                        lenia_simulator.fill_channel(&data, i);
-                    }
-                    else {
-                        lenia_simulator.fill_channel(&lenia_ca::seeders::constant(lenia_simulator.shape(), 0.0), i);
-                    }
-                }
-            }
-            ',' => {
-                cumulate_lenia(&mut lenia_simulator, &mut rules, maximum_adjust, kernel_radius, sigma_base);
-            }
-            'n' => { 
-                rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
-            }
-            'm' => { adjust_lenia(&mut lenia_simulator, &rules, maximum_adjust, kernel_radius, sigma_base); }
-            'i' => { lenia_simulator.iterate(); }
-            's' => { simulating = !simulating; }
-            'k' => { checking_kernel = !checking_kernel; }
-            'x' => { kernel_index += if kernel_index + 1 == lenia_simulator.convolution_channels() {0} else {1};}
-            'z' => { kernel_index -= if kernel_index == 0 {0} else {1};}
-            '+' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.25); }
-            '-' => { lenia_simulator.set_dt(lenia_simulator.dt() * 1.0/1.25); }
-            '8' => { if z_depth != (Z_SIDE_LEN-1) { z_depth += 1 }; if kernel_z_depth != (kernel_radius-1) { kernel_z_depth += 1 }; println!("Depth: {}", z_depth); }
-            '2' => { if z_depth != 0 { z_depth -= 1 }; if kernel_z_depth != 0 { kernel_z_depth -= 1 }; println!("Depth: {}", z_depth); }
-            't' => { checking_transformed = !checking_transformed; }
-            'c' => { lenia_ca::export_frame_as_png(
-                    lenia_ca::BitDepth::Eight,
-                    lenia_simulator.get_channel_as_ref(0), 
-                    &"0", 
-                    &r"./output/density");
-                lenia_ca::export_frame_as_png(
-                    lenia_ca::BitDepth::Eight,
-                    lenia_simulator.get_deltas_as_ref(0), 
-                    &"0", 
-                    &r"./output/delta/"); 
-                if channel_shape.len() == 4 && lenia_simulator.channels() > 1 {
-                    lenia_ca::export_frame_as_png(
-                        lenia_ca::BitDepth::Eight,
-                        lenia_simulator.get_channel_as_ref(1), 
-                        &"0", 
-                        &r"./output/density2");
-                    lenia_ca::export_frame_as_png(
-                        lenia_ca::BitDepth::Eight,
-                        lenia_simulator.get_deltas_as_ref(1), 
-                        &"0", 
-                        &r"./output/delta2/"); 
-                }
-            }
-            'f' => {
-                continuous_capture = !continuous_capture;
-                capture_counter = 0;
-            }
-            'm' => {
-                for i in 0..lenia_simulator.channels() {
-                    let mut new_channel = lenia_simulator.get_channel_as_ref(i).clone();
-                    new_channel.invert_axis(ndarray::Axis(0));
-                    lenia_simulator.fill_channel(&new_channel, i);
-                }
-            }
-            'd' => {
-                checking_deltas = !checking_deltas;
-            }
-            _ => {}
-        }
-        keyboardstate.character = '\0';
-
-        let width = image.width() as usize;
-        let kernel_3d_clone = lenia_simulator.get_kernel_as_ref(kernel_index);
-        if checking_kernel {
-            if checking_transformed {
-                for (y, row) in image.chunks_mut(width).enumerate() {
-                    for (x, pixel) in row.iter_mut().enumerate() {
-                        if kernel_3d_clone.transformed.shape().len() == 2 {
-                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
-                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                            pixel.g = 127;//(kernel_3d_clone.shifted[[coords.0, coords.1]] * 255.0) as u8;
-                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                        }
-                        else if kernel_3d_clone.transformed.shape().len() == 3 {
-                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
-                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                            pixel.g = 127;
-                            //pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1, 0]] * 255.0 * GAIN) as u8;
-                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                        }
-                        else {
-                            let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
-                            pixel.r = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth, z_depth]].re * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                            pixel.g = 127;
-                            //pixel.g = (kernel_3d_clone.shifted[[coords.0, coords.1, 0]] * 255.0 * GAIN) as u8;
-                            pixel.b = (127 + ((kernel_3d_clone.transformed[[coords.0, coords.1, z_depth, z_depth]].im * 127.0 * GAIN).clamp(-127.0, 127.0) as i32)) as u8;
-                        }
-                    }
-                }
-            }
-            else {
-                for (y, row) in image.chunks_mut(width).enumerate() {
-                    row.into_par_iter().enumerate().for_each(|(x, pixel)| {
-                        let x_index = ((x as f64 / (SCALE * X_SIDE_LEN) as f64) * kernel_3d_clone.base.shape()[0] as f64) as usize;
-                        let y_index = ((y as f64 / (SCALE * Y_SIDE_LEN) as f64) * kernel_3d_clone.base.shape()[1] as f64) as usize;
-                        if kernel_3d_clone.base.shape().len() == 2 {
-                            pixel.r = (kernel_3d_clone.base[[x_index, y_index]] * 255.0) as u8;
-                        } 
-                        else if kernel_3d_clone.transformed.shape().len() == 3 {
-                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth]] * 255.0) as u8;
-                        }
-                        else {
-                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth, kernel_z_depth]] * 255.0) as u8;
-                        }
-                        pixel.g = pixel.r;
-                        pixel.b = pixel.r;
-                    });
-                    /*for (x, pixel) in row.iter_mut().enumerate() {
-                        let x_index = ((x as f64 / (SCALE * X_SIDE_LEN) as f64) * kernel_3d_clone.base.shape()[0] as f64) as usize;
-                        let y_index = ((y as f64 / (SCALE * Y_SIDE_LEN) as f64) * kernel_3d_clone.base.shape()[1] as f64) as usize;
-                        if kernel_3d_clone.base.shape().len() == 2 {
-                            pixel.r = (kernel_3d_clone.base[[x_index, y_index]] * 255.0) as u8;
-                        } 
-                        else if kernel_3d_clone.transformed.shape().len() == 3 {
-                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth]] * 255.0) as u8;
-                        }
-                        else {
-                            pixel.r = (kernel_3d_clone.base[[x_index, y_index, kernel_z_depth, kernel_z_depth]] * 255.0) as u8;
-                        }
-                        pixel.g = pixel.r;
-                        pixel.b = pixel.r;
-                    }*/
-                }
-            }
-        }
-        else {
-            let fetchtime = std::time::Instant::now();
-            let channels = view_channels.clone();
-            frames.par_iter_mut().enumerate().for_each(|(i, frame)| {
-                let negative;
-                let mut view_channel = if channels[i] < 0 { 
-                        negative = true; 
-                        channels[i].abs() as usize 
-                    } 
-                    else { 
-                        negative = false; channels[i].abs() as usize 
-                    };
-                view_channel = if view_channel > lenia_simulator.channels() { 
-                        0
-                    } 
-                    else { 
-                        view_channel 
-                    };
-                if view_channel == 0 {
-                    *frame = empty_frame.clone();
-                }
-                else {
-                    if checking_deltas {
-                        lenia_ca::get_frame(frame, lenia_simulator.get_deltas_as_ref(view_channel - 1), &view_axis, &[0, 0, z_depth, z_depth]);
-                        frame.par_iter_mut().for_each(|a| { *a = (*a * 0.5) + 0.5 });
-                    }
-                    else {
-                        lenia_ca::get_frame(frame, lenia_simulator.get_channel_as_ref(view_channel - 1), &view_axis, &[0, 0, z_depth, z_depth]);
-                        if negative { frame.par_iter_mut().for_each(|a| { *a *= -1.0; }) }
-                    }
-                }
-            });
-            /*for (i, channel) in view_channels.iter().enumerate() {
-                let negative;
-                let mut view_channel = if *channel < 0 { 
-                        negative = true; 
-                        channel.abs() as usize 
-                    } 
-                    else { 
-                        negative = false; channel.abs() as usize 
-                    };
-                view_channel = if view_channel > lenia_simulator.channels() { 
-                        0
-                    } 
-                    else { 
-                        view_channel 
-                    };
-                if view_channel == 0 {
-                    frames[i] = empty_frame.clone();
-                }
-                else {
-                    if checking_deltas {
-                        lenia_ca::get_frame(&mut frames[i], lenia_simulator.get_deltas_as_ref(view_channel - 1), &view_axis, &[0, 0, z_depth, z_depth]);
-                        frames[i].par_iter_mut().for_each(|a| { *a = (*a * 0.5) + 0.5 });
-                    }
-                    else {
-                        lenia_ca::get_frame(&mut frames[i], lenia_simulator.get_channel_as_ref(view_channel - 1), &view_axis, &[0, 0, z_depth, z_depth]);
-                        if negative { frames[i].par_iter_mut().for_each(|a| { *a *= -1.0; }) }
-                    }
-                }
-            }*/
-            for (y, row) in image.chunks_mut(width).enumerate() {
-                row.par_iter_mut().enumerate().for_each(|(x, pixel)| {
-                    let coords = ((x as f64 * inv_scale) as usize, (y as f64 * inv_scale) as usize);
-                    unsafe {
-                        pixel.r = (frames[0].uget([coords.0, coords.1]) * 255.0) as u8;
-                        pixel.g = ((frames[1].uget([coords.0, coords.1]) * 255.0) as u16 + 0 as u16).clamp(0, 255) as u8;
-                        pixel.b = ((frames[2].uget([coords.0, coords.1]) * 255.0) as u16 + 0 as u16).clamp(0, 255) as u8;
-                    }
-                });
-            }
-            if simulating {
-                frame_counter += 1;
-                if frame_counter >= render_rate {
-                    lenia_simulator.iterate();
-                    frame_counter = 0;
-                }  
-            }
-        }
-    });
+fn format_vec_f64(v: &Vec<f64>, decimal_digits: usize) -> String {
+    let formatted_nums: Vec<String> = v.iter().map(|num| format!("{:.1$}", num, decimal_digits)).collect();
+    let mut numbers = formatted_nums.join(", ");
+    numbers.insert(0, '[');
+    numbers + "]"
 }

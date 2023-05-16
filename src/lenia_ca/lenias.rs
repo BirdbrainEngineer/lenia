@@ -38,13 +38,9 @@ impl Lenia for StandardLenia {
     /// By default the kernel, growth function and dt parameter are set such that when 
     /// simulating, the simulation is capable of producing the ***Orbium unicaudatus*** glider.
     /// 
-    /// ### Arguments
+    /// ### Parameters
     /// 
     /// * `shape` - Reference to the shape that the channels in the `Lenia` instance shall have.
-    /// 
-    /// ### Returns
-    /// 
-    /// A `StandardLenia2D` instance, which implements `Lenia` trait.
     /// 
     /// ### Panics
     /// 
@@ -80,7 +76,6 @@ impl Lenia for StandardLenia {
             field: ndarray::ArrayD::from_elem(shape, 0.0),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
-            mode: ChannelMode::Positive,
         };
         
         StandardLenia{
@@ -171,10 +166,6 @@ impl Lenia for StandardLenia {
         &mut self.channel.field
     }
 
-    fn get_deltas_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
-        &mut self.channel.field
-    }
-
     fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
         &self.convolved
     }
@@ -201,15 +192,6 @@ impl Lenia for StandardLenia {
 
     fn weights(&self, channel: usize) -> &[f64] {
         &self.channel.weights
-    }
-
-    fn get_channel_mode(&self, channel: usize) -> Option<ChannelMode> {
-        println!("Channel modes not available for standard Lenia!");
-        Option::None
-    }
-
-    fn set_channel_mode(&mut self, channel: usize, mode: ChannelMode) {
-        println!("Channel modes not available for standard Lenia!");
     }
 }
 
@@ -245,7 +227,6 @@ impl Lenia for ExpandedLenia {
             field: ndarray::ArrayD::from_elem(shape, 0.0),
             weights: vec![1.0],
             weight_sum_reciprocal: 1.0,
-            mode: ChannelMode::Positive,
         };
 
         let mut channel_shape = Vec::new();
@@ -394,28 +375,10 @@ impl Lenia for ExpandedLenia {
                     );
                 }
                 // Add update channel and clamp
-                let mode = channel.mode;
                 let dt_reciprocal = 1.0 / dt;
                 ndarray::Zip::from(&mut channel.field).and(&mut deltas.view_mut()).and(&previous_deltas).par_for_each(|a, b, c| {
                     let previous = *a;
-                    match mode {
-                        ChannelMode::Positive => { *a = (previous + (*b * dt)).clamp(0.0, 1.0); }
-                        ChannelMode::Negative => { *a = (previous + (*b * dt)).clamp(-1.0, 0.0); }
-                        ChannelMode::Fullrange => { *a = (previous + (*b * dt)).clamp(-1.0, 1.0); }
-                        ChannelMode::Activation => { *a = *b; }
-                        ChannelMode::DeltaPositive => { 
-                            *a = ((*c + (*b * dt)).clamp(0.0, 1.0) - *c) * dt_reciprocal; 
-                            *b = (*c + (*b * dt)).clamp(0.0, 1.0);
-                        }
-                        ChannelMode::DeltaNegative => { 
-                            *a = ((*c + (*b * dt)).clamp(-1.0, 0.0) - *c) * dt_reciprocal; 
-                            *b = (*c + (*b * dt)).clamp(-1.0, 0.0);
-                        }
-                        ChannelMode::DeltaFullrange => { 
-                            *a = ((*c + (*b * dt)).clamp(-1.0, 1.0) - *c) * dt_reciprocal; 
-                            *b = (*c + (*b * dt)).clamp(-1.0, 1.0);
-                        }
-                    }
+                    *a = (previous + (*b * dt)).clamp(0.0, 1.0);
                 });
             }));
         }
@@ -455,7 +418,6 @@ impl Lenia for ExpandedLenia {
                         field: ndarray::ArrayD::from_elem(self.shape.clone(), 0.0),
                         weights: weights_prototype.clone(),
                         weight_sum_reciprocal: 0.0,
-                        mode: ChannelMode::Positive,
                     }
                 );
                 self.deltas.push(ndarray::ArrayD::from_elem(self.shape.clone(), 0.0));
@@ -559,10 +521,6 @@ impl Lenia for ExpandedLenia {
         &mut self.channels[channel].field
     }
 
-    fn get_deltas_as_mut_ref(&mut self, channel: usize) -> &mut ndarray::ArrayD<f64> {
-        &mut self.deltas[channel]
-    }
-
     fn get_convoluted_as_ref(&self, conv_channel: usize) -> &ndarray::ArrayD<Complex<f64>> {
         &self.convolutions[conv_channel]
     }
@@ -590,14 +548,6 @@ impl Lenia for ExpandedLenia {
     fn weights(&self, channel: usize) -> &[f64] {
         &self.channels[channel].weights
     } 
-
-    fn get_channel_mode(&self, channel: usize) -> Option<ChannelMode> {
-        Option::Some(self.channels[channel].mode)
-    }
-
-    fn set_channel_mode(&mut self, channel: usize, mode: ChannelMode) {
-        self.channels[channel].mode = mode;
-    }
 }
 
 

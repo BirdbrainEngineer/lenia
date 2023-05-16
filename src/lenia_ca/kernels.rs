@@ -1,28 +1,22 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-use std::ops::IndexMut;
-
 /// Collection of generators for some of the common Lenia kernels. 
 
 use super::*;
 use ndarray::IxDyn;
-use rustfft::num_traits::pow;
 
 /// Creates the kernel base for a gaussian donut in 2d. 
 /// The mean (position of the highest value) is placed at `0.5`
 /// in the range `[0.0..1.0]`, where `0.0` is the center of the kernel and `1.0` the outer edge.
 /// 
 /// 
-/// ### Arguments
+/// ### Parameters
 /// 
-/// * `diameter` - The diameter of the whole kernel. The kernel is guaranteed to be square in shape,
-/// but any values outside the radius (`diameter / 2`) are set to `0.0`.
+/// * `radius` - The radius of the kernel. The kernel is guaranteed to be square in shape,
+/// but any values outside the radius are set to `0.0`.
 /// 
 /// * `stddev` - Standard deviation to use. 
-/// 
-/// ### Returns
-/// A 2d array (`ndarray::ArrayD`) of `f64` values.
 pub fn gaussian_donut_2d(radius: usize, stddev: f64) -> ndarray::ArrayD<f64> {
     let diameter = radius * 2;
     let radius = radius as f64;
@@ -49,10 +43,10 @@ pub fn gaussian_donut_2d(radius: usize, stddev: f64) -> ndarray::ArrayD<f64> {
 /// Create the base for a kernel made from multiple concentric gaussian "donuts" in 2d.
 /// Each donut/ring is a single index in the list of parameters. 
 /// 
-/// ### Arguments
+/// ### Parameters
 /// 
-/// * `diameter` - The diameter of the whole kernel. The kernel is guaranteed to be square in shape.
-/// but any values outside the radius (`diameter / 2`) are set to `0.0`.
+/// * `radius` - The radius of the kernel. The kernel is guaranteed to be square in shape.
+/// but any values outside the radius are set to `0.0`.
 /// 
 /// * `means` - The placement of the peak values of individual rings. 
 /// Should be in range `[0.0..1.0]`, where `0.0` is the center point of the kernel and
@@ -62,9 +56,6 @@ pub fn gaussian_donut_2d(radius: usize, stddev: f64) -> ndarray::ArrayD<f64> {
 /// Can be any positive real number but will later be normalized compared to other rings.
 /// 
 /// * `stddevs` - The standard deviations of each individual ring.
-/// 
-/// ### Returns
-/// 2d array (`ndarray::ArrayD`) of `f64` values.
 pub fn multi_gaussian_donut_2d(radius: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
     if means.len() != peaks.len() || means.len() != stddevs.len() {
         panic!("Function \"multi_gaussian_donut_2d\" expects each mean parameter to be accompanied by a peak and stddev parameter!");
@@ -99,15 +90,12 @@ pub fn multi_gaussian_donut_2d(radius: usize, means: &[f64], peaks: &[f64], stdd
 /// The mean (position of the highest value) is placed at `0.5`
 /// in the range `[0.0..1.0]`, where `0.0` is the center of the kernel and `1.0` the outer edge.
 /// 
-/// ### Arguments
+/// ### Parameters
 /// 
-/// * `diameter` - The diameter of the kernel in every axis. 
-/// Any values outside the radius (`diameter / 2`) are set to `0.0`.
+/// * `radius` - The radius of the kernel in every axis. 
+/// Any values outside the radius are set to `0.0`.
 /// 
 /// * `stddev` - Standard deviation to use. 
-/// 
-/// ### Returns
-/// An n-dimensional array (`ndarray::ArrayD`) of `f64` values.
 pub fn gaussian_donut_nd(radius: usize, dimensions: usize, stddev: f64) -> ndarray::ArrayD<f64> {
     let radius = radius as f64;
     let normalizer = 1.0 / radius;
@@ -139,10 +127,10 @@ pub fn gaussian_donut_nd(radius: usize, dimensions: usize, stddev: f64) -> ndarr
 /// Create the base for a kernel made from multiple radial gaussian "hyper-donuts" in n dimensions.
 /// Each donut/ring is a single index in the list of parameters. 
 /// 
-/// ### Arguments
+/// ### Parameters
 /// 
-/// * `diameter` - The diameter of the whole kernel in each axis.
-/// Any values outside the radius (`diameter / 2`) are set to `0.0`.
+/// * `radius` - The radius of the kernel in each axis.
+/// Any values outside the radius are set to `0.0`.
 /// 
 /// * `means` - The placement of the peak values of individual donuts
 /// Should be in range `[0.0..1.0]`, where `0.0` is the center point of the kernel and
@@ -152,9 +140,6 @@ pub fn gaussian_donut_nd(radius: usize, dimensions: usize, stddev: f64) -> ndarr
 /// Can be any positive real number but will later be normalized compared to other donuts.
 /// 
 /// * `stddevs` - The standard deviations of each individual donut.
-/// 
-/// ### Returns
-/// An n-dimensional array (`ndarray::ArrayD`) of `f64` values.
 pub fn multi_gaussian_donut_nd(radius: usize, dimensions: usize, means: &[f64], peaks: &[f64], stddevs: &[f64]) -> ndarray::ArrayD<f64> {
     let radius = radius as f64;
     let normalizer = 1.0 / radius;
@@ -187,68 +172,17 @@ pub fn multi_gaussian_donut_nd(radius: usize, dimensions: usize, means: &[f64], 
     out
 }
 
-pub fn exponential_donuts(radius: usize, dimensions: usize, means: &[f64], peaks: &[f64], exponents: &[f64]) -> ndarray::ArrayD<f64> {
-    let radius = radius as f64;
-    let normalizer = 1.0 / radius;
-    let center = vec![radius; dimensions];
-    let mut shape: Vec<usize> = Vec::new();
-    let mut index: Vec<f64> = Vec::new();
-    for i in 0..dimensions {
-        shape.push((radius * 2.0) as usize);
-        index.push(0.0);
-    }
-    let out = ndarray::ArrayD::from_shape_fn(
-        shape, 
-        |index_info| {
-            for i in 0..index.len() {
-                index[i] = index_info[i] as f64;
-            }
-            let mut dist = euclidean_dist(&index, &center);
-            if dist > radius {
-                0.0
-            }
-            else {
-                dist *= normalizer;
-                let mut sum = 0.0;
-                for i in 0..means.len() {
-                    sum += super::sample_exponential((dist - means[i]).abs(), exponents[i], peaks[i]);
-                }
-                sum
-            }
-        }
-    );
-    out
-}
-
-pub fn inverse_distance_bump(radius: usize, dimensions: usize, peak: f64, exponent: f64) -> ndarray::ArrayD<f64> {
-    let radius = radius as f64;
-    let normalizer = 1.0 / radius;
-    let center = vec![radius; dimensions];
-    let mut shape: Vec<usize> = Vec::new();
-    let mut index: Vec<f64> = Vec::new();
-    for i in 0..dimensions {
-        shape.push((radius * 2.0) as usize);
-        index.push(0.0);
-    }
-    let out = ndarray::ArrayD::from_shape_fn(
-        shape, 
-        |index_info| {
-            for i in 0..index.len() {
-                index[i] = index_info[i] as f64;
-            }
-            let mut dist = euclidean_dist(&index, &center);
-            if dist > radius {
-                0.0
-            }
-            else {
-                dist *= normalizer;
-                -(peak * dist.powf(exponent) + peak)
-            }
-        }
-    );
-    out
-}
-
+/// Creates a radially symmetric kernel. 
+/// 
+/// ### Parameters
+/// 
+/// * `radius` - Radius of the kernel field to generate.
+/// 
+/// * `dimensions` - dimensionality of the kernel field to generate.
+/// 
+/// * `params[0..n]` - Value to set based on the distance from the center of the kernel
+/// to the outer edge of the kernel, where `params[0]` is the value at the kernel center
+/// and `params[1]` is the value at the edge of the kernel. 
 pub fn precalculated_linear(radius: usize, dimensions: usize, params: &[f64]) -> ndarray::ArrayD<f64> {
     let radius = radius as f64;
     let normalizer = 1.0 / radius;
@@ -277,8 +211,14 @@ pub fn precalculated_linear(radius: usize, dimensions: usize, params: &[f64]) ->
     out
 }
 
-/// params[0] = polynomial power
-/// params[1..n] = peak heights
+/// Creates the kernel base for "polynomial donuts". The peaks of the individual rings are equally spaced
+/// around the center of the kernel. 
+/// 
+/// ### Parameters
+/// 
+/// * `params[0]` - Polynomial power, usually set to `4.0`;
+/// 
+/// * `params[1..n]` - Peak heights of the individual donuts.
 pub fn polynomial_nd(radius: usize, dimensions: usize, params: &[f64]) -> ndarray::ArrayD<f64> {
     let radius = radius as f64;
     let normalizer = 1.0 / radius;
@@ -324,15 +264,15 @@ fn c(r: f64, alpha: f64) -> f64 {
 /// Moore neighborhood with radius of 1 in 2D. 
 /// 
 /// This is the kernel to use for Conway's game of life. 
-pub fn moore1() -> ndarray::ArrayD<f64> {
+pub fn conway_game_of_life() -> ndarray::ArrayD<f64> {
     let mut out = ndarray::ArrayD::from_elem(vec![3 as usize, 3], 1.0);
     out[[1, 1]] = 0.0;
     out
 }
 
-/// Kernel for "SmoothLife" cellular automaton in any dimensionality. 
+/// Kernel for "SmoothLife" cellular automaton in any dimensionality. Not completely faithful to SmoothLife.
 /// 
-/// ###Parameters
+/// ### Parameters
 /// 
 /// * `radius` - Radius of the kernel to generate.
 /// 
