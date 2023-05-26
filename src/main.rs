@@ -1,6 +1,6 @@
 mod lenia_ca;
 mod keyboardhandler;
-use std::{sync::mpsc::channel, ops::IndexMut};
+use std::{sync::mpsc::channel, ops::IndexMut, thread::JoinHandle};
 
 use ndarray::{ArrayD, IntoNdProducer};
 use std::{ops::Range, thread, sync::{Arc, Mutex}};
@@ -18,11 +18,13 @@ use rand::*;
 
 //const X_SIDE_LEN: usize = 1280;
 //const Y_SIDE_LEN: usize = 720;
-const X_SIDE_LEN: usize = 1920/2;
-const Y_SIDE_LEN: usize = 1080/2;
+//const X_SIDE_LEN: usize = 1920/2;
+//const Y_SIDE_LEN: usize = 1080/2;
+const X_SIDE_LEN: usize = 100;
+const Y_SIDE_LEN: usize = 100;
 const Z_SIDE_LEN: usize = 50;
 const W_SIDE_LEN: usize = 50;
-const SCALE: usize = 2;
+const SCALE: usize = 5;
 const GAIN: f64 = 5000.0;
 const MU_RANGE: Range<f64> = 0.1..0.6;
 const KERNEL_RANGE: Range<f64> = 0.01..1.0;
@@ -44,16 +46,16 @@ fn main() {
     let mut kernel_z_depth = kernel_radius / 2;
     let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
     let view_axis = [0, 1];
-    let fill_channels = vec![true, false, true, true, true, false, false, false];
-    let randomness_scalers = vec![0.5, 0.618, 0.618, 0.618, 0.618, 1.0, 1.0, 1.0];
-    let randomness_sizes = vec![150, 120, 120, 120, 120, 50, 50, 50];
-    let randomness_patches = vec![20, 20, 20, 20, 20, 1, 1, 1, 1];
+    let fill_channels = vec![true, true, false, false, false, false, false, false];
+    let randomness_scalers = vec![0.7, 0.618, 0.618, 0.618, 0.618, 1.0, 1.0, 1.0];
+    let randomness_sizes = vec![22, 25, 120, 120, 120, 50, 50, 50];
+    let randomness_patches = vec![7, 4, 20, 20, 20, 1, 1, 1, 1];
     let discrete_randomness = false;
-    let view_channels: Vec<i32> = vec![1, 1, 1];
+    let view_channels: Vec<i32> = vec![1, 1, 2];
     let dt = 1.0;
     let render_rate = 1;
     let skip_frames = 1;
-    let capture_deltas = false;
+    let capture_deltas = true;
 
     let num_channels: usize = 3;
     let num_convolutions: usize = 12;
@@ -63,24 +65,40 @@ fn main() {
     let mut rules: Vec<Vec<f64>> = Vec::new();
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
-    //lenia_simulator.set_kernel(kernels::smoothlife(15, 2, 0.8), 0);
-    //lenia_simulator.set_growth_function(growth_functions::smooth_life, vec![0.27, 0.36, 0.26, 0.46], 0);
-
-    //lenia_simulator.set_channels(2);
-    lenia_simulator.set_convolution_channels(2);
-    lenia_simulator.set_convolution_channel_source(1, 0);
-    lenia_simulator.set_growth_function(growth_functions::smooth_life_sigmoid_smoothed, vec![0.257, 0.336, 0.0, 0.01, 0.028, 0.2], 0);
-    lenia_simulator.set_growth_function(growth_functions::smooth_life_sigmoid_smoothed, vec![0.0, 0.01, 0.365, 0.549, 0.2, 0.147], 1);
-    lenia_simulator.set_kernel(kernels::smoothlife(13, 2, 0.5), 0);
-    lenia_simulator.set_kernel(kernels::smoothlife(4, 2, 1.0), 1);
-    //lenia_simulator.set_kernel(kernels::polynomial_nd(kernel_radius, 2, &vec![4.0, 1.0, 0.666, 0.333, 0.666]), 0);
-    //lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.16, 0.01], 0);
-    //lenia_simulator.set_kernel(kernels::polynomial_nd(kernel_radius, 2, &vec![4.0, 1.0, 0.666, 0.333, 0.666]), 1);
-    //lenia_simulator.set_growth_function(growth_functions::pass, vec![4.0], 1);
-    //lenia_simulator.set_channel_mode(1, ChannelMode::Activation);
-    lenia_simulator.set_weights(0, &vec![1.0, 1.0]);
-    //lenia_simulator.set_weights(1, &vec![0.0, 1.0]);
+    lenia_simulator.set_kernel(kernels::smoothlife(15, 2, 0.8), 0);
+    lenia_simulator.set_growth_function(growth_functions::smooth_life, vec![0.27, 0.36, 0.26, 0.46], 0);
+    lenia_simulator.set_channels(2);
+    lenia_simulator.set_convolution_channels(3);
+    lenia_simulator.set_convolution_channel_source(0, 0);
+    lenia_simulator.set_convolution_channel_source(1, 1);
+    lenia_simulator.set_convolution_channel_source(2, 1);
+    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.15, 0.021], 0);
+    lenia_simulator.set_growth_function(growth_functions::polynomial, vec![0.25, 0.03, 4.0], 1);
+    lenia_simulator.set_growth_function(growth_functions::standard_lenia, vec![0.07, 0.025], 2);
+    lenia_simulator.set_kernel(kernels::gaussian_donut_2d(13, 1.0/6.7), 0);
+    lenia_simulator.set_kernel(kernels::polynomial_nd(24, 2, &vec![4.0, 1.0, 0.33]), 1);
+    lenia_simulator.set_kernel(kernels::multi_gaussian_donut_2d(20, &vec![0.75], &vec![1.0], &vec![0.1]), 2);
+    lenia_simulator.set_weights(0, &vec![0.6, 0.0, 0.4]);
+    lenia_simulator.set_weights(1, &vec![0.0, 1.0, 0.0]);
     lenia_simulator.set_dt(0.1);
+
+    /*lenia_ca::export_frame_as_png(
+        lenia_ca::BitDepth::Eight,
+        &kernels::gaussian_donut_2d(13, 1.0/6.7), 
+        &"kernel_0", 
+        &r"./output/");
+
+    lenia_ca::export_frame_as_png(
+        lenia_ca::BitDepth::Eight,
+        &kernels::polynomial_nd(24, 2, &vec![4.0, 1.0, 0.33]), 
+        &"kernel_1", 
+        &r"./output/");
+
+    lenia_ca::export_frame_as_png(
+        lenia_ca::BitDepth::Eight,
+        &kernels::multi_gaussian_donut_2d(20, &vec![0.75], &vec![1.0], &vec![0.1]), 
+        &"kernel_2", 
+        &r"./output/");*/
 
     //let mut rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
 
@@ -116,21 +134,32 @@ fn main() {
 
         if simulating && continuous_capture {
             if capture_counter >= skip_frames {
-                let density_handle = lenia_ca::export_frame_as_png(
-                    lenia_ca::BitDepth::Eight,
-                    lenia_simulator.get_channel_as_ref(0), 
-                    format!("{}", frame_index).as_str(), 
-                    &r"./output/density");
-                if capture_deltas {
-                    let delta_handle = lenia_ca::export_frame_as_png(
+                let mut density_handles: Vec<JoinHandle<()>> = Vec::new();
+                let mut delta_handles: Vec<JoinHandle<()>> = Vec::new();
+                for i in 0..lenia_simulator.channels() {
+                    density_handles.push(lenia_ca::export_frame_as_png(
                         lenia_ca::BitDepth::Eight,
-                        lenia_simulator.get_deltas_as_ref(0), 
-                        format!("{}", frame_index).as_str(), 
-                        &r"./output/delta");
-                    delta_handle.join().unwrap();
+                        lenia_simulator.get_channel_as_ref(i), 
+                        format!("{}_{}", i, frame_index).as_str(), 
+                        &r"./output/density"));
+                    if capture_deltas {
+                        delta_handles.push(lenia_ca::export_frame_as_png(
+                            lenia_ca::BitDepth::Eight,
+                            lenia_simulator.get_deltas_as_ref(i), 
+                            format!("{}_{}", i, frame_index).as_str(), 
+                            &r"./output/delta"));
+                    }
                 }
+                
                 frame_index += 1;
-                density_handle.join().unwrap();
+                for handle in density_handles {
+                    handle.join().unwrap();
+                }
+                if capture_deltas {
+                    for handle in delta_handles {
+                        handle.join().unwrap();
+                    }
+                }
                 capture_counter = 0;
             }
             else {
@@ -178,7 +207,7 @@ fn main() {
                     lenia_ca::BitDepth::Eight,
                     lenia_simulator.get_channel_as_ref(0), 
                     &"0", 
-                    &r"./output/density");
+                    &r"./output/density/");
                 lenia_ca::export_frame_as_png(
                     lenia_ca::BitDepth::Eight,
                     lenia_simulator.get_deltas_as_ref(0), 

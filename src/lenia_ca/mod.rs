@@ -81,10 +81,6 @@ pub fn sample_exponential(x: f64, exponent: f64, peak: f64) -> f64 {
 /// 
 /// * `dimensions` - Which indexes in any other axes the 2d slice is extracted from. 
 /// The entries for axes selected in `display_axes` can be any number, and will be disregarded. 
-/// 
-/// ### Panics
-/// 
-/// If the specified `channel` does not exist. 
 pub fn get_frame(input: &ndarray::ArrayD<f64>, output: &mut ndarray::Array2<f64>, display_axes: &[usize; 2], dimensions: &[usize]) {
     if input.shape().len() == 2 {
         ndarray::Zip::from(output).and(input.view().into_dimensionality::<ndarray::Ix2>().unwrap()).par_for_each(|a, b| { *a = *b; });
