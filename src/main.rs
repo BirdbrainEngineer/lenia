@@ -11,17 +11,17 @@ use rayon::{prelude::*, iter::empty};
 use rand::*;
 
 // Make sure to compile as release and run the release version - error checks make the program slow otherwise.
-// *If you have a beefy cpu then 1280x720 should run at or close to 60fps up to ~8 channels and kernels.
+// *If you have a beefy and modern cpu then 1280x720 should run at or close to 60fps with 1 channel and kernel 
+// per physical core.
 // *Reduce X_SIDE_LEN and Y_SIDE_LEN if the simulation feels sluggish.
 // *SCALE magnifies the simulated board for render. Eg. if X and Y side lengths are
-// 1000x500, and SCALE is 2, then the created window for rendering will be 2000x1000 pixels.
+// 1000x500, and SCALE is 2, then the created window for rendering will be 2000x1000 pixels. If you make the 
+// created window extremely large (larger than your display max resolution) then your OS and system will have a stroke. 
 
-//const X_SIDE_LEN: usize = 1280;
-//const Y_SIDE_LEN: usize = 720;
+const X_SIDE_LEN: usize = 1280;
+const Y_SIDE_LEN: usize = 720;
 //const X_SIDE_LEN: usize = 1920/2;
 //const Y_SIDE_LEN: usize = 1080/2;
-const X_SIDE_LEN: usize = 100;
-const Y_SIDE_LEN: usize = 100;
 const Z_SIDE_LEN: usize = 50;
 const W_SIDE_LEN: usize = 50;
 const SCALE: usize = 5;
@@ -82,26 +82,7 @@ fn main() {
     lenia_simulator.set_weights(1, &vec![0.0, 1.0, 0.0]);
     lenia_simulator.set_dt(0.1);
 
-    /*lenia_ca::export_frame_as_png(
-        lenia_ca::BitDepth::Eight,
-        &kernels::gaussian_donut_2d(13, 1.0/6.7), 
-        &"kernel_0", 
-        &r"./output/");
-
-    lenia_ca::export_frame_as_png(
-        lenia_ca::BitDepth::Eight,
-        &kernels::polynomial_nd(24, 2, &vec![4.0, 1.0, 0.33]), 
-        &"kernel_1", 
-        &r"./output/");
-
-    lenia_ca::export_frame_as_png(
-        lenia_ca::BitDepth::Eight,
-        &kernels::multi_gaussian_donut_2d(20, &vec![0.75], &vec![1.0], &vec![0.1]), 
-        &"kernel_2", 
-        &r"./output/");*/
-
-    //let mut rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
-
+    let mut rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
     
     let mut frames: Vec<ndarray::Array2<f64>> = Vec::new();
     for i_ in 0..3 {
