@@ -18,6 +18,9 @@ use rand::*;
 // *SCALE magnifies the simulated board for render. Eg. if X and Y side lengths are
 // 1000x500, and SCALE is 2, then the created window for rendering will be 2000x1000 pixels. If you make the 
 // created window extremely large (larger than your display max resolution) then your OS and system will have a stroke. 
+//
+// I'm sorry that there is not better documentation for this, but this Lenia renderer was simply not the "important"
+// part of this project. If this is completely incomprehensible for you, then I suggest using lenia_ca crate directly.
 
 const X_SIDE_LEN: usize = 1280;
 const Y_SIDE_LEN: usize = 720;
