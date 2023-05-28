@@ -1,5 +1,5 @@
 # Birdbrain's Lenia renderer
-This repository contains my quick and dirty "workspace" to explore the [Standard Lenia](https://arxiv.org/abs/1812.05433) and [Expanded Lenia](https://arxiv.org/abs/2005.03742) cellular automata systems. The code is written purely in Rust and uses [lenia_ca](https://github.com/BirdbrainEngineer/lenia) crate by your's truly to simulate the systems. Since the ``lenia_ca`` crate makes heavy use of [ndarray](https://docs.rs/ndarray/latest/ndarray/) crate, then you should also familiarize yourself with that.
+This repository contains my quick and dirty "workspace" to explore the [Standard Lenia](https://arxiv.org/abs/1812.05433) and [Expanded Lenia](https://arxiv.org/abs/2005.03742) cellular automata systems. The code is written purely in Rust and uses [lenia_ca](https://github.com/BirdbrainEngineer/lenia_ca) crate by your's truly to simulate the systems. Since the ``lenia_ca`` crate makes heavy use of [ndarray](https://docs.rs/ndarray/latest/ndarray/) crate, then you should also familiarize yourself with that.
 
 It is recommended that instead of using this Lenia renderer, you make your own, as this renderer is extremely unoptimized and rather slow. You can simply use the ``lenia_ca`` crate for the backend simulation.
 
