@@ -534,10 +534,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
+name = "lenia_ca"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3805c74d5a3f4a5b7468b3ecf580307d180241e863dee7c67a570d008580f2bd"
+dependencies = [
+ "ndarray",
+ "num-complex",
+ "png",
+ "rayon",
+ "rustfft",
+]
+
+[[package]]
 name = "lenia_simulator"
 version = "0.1.0"
 dependencies = [
  "glium",
+ "lenia_ca",
  "ndarray",
  "num-complex",
  "pixel-canvas",

@@ -167,7 +167,7 @@ pub fn random_hyperspheres(shape: &[usize], radius: usize, spheres:usize, scaler
             for i in 0..index.len() {
                 index[i] = index_info[i] as f64;
             }
-            let dist = kernels::euclidean_dist(&center, &index);
+            let dist = euclidean_dist(&center, &index);
             if dist > center[0] { *a = 0.0; }
             else { *a = *a; }
         });
@@ -195,3 +195,11 @@ pub fn random_hyperspheres(shape: &[usize], radius: usize, spheres:usize, scaler
     out
 }
 
+/// Euclidean distance between points `a` and `b`. 
+fn euclidean_dist(a: &[f64], b: &[f64]) -> f64 {
+    let mut out: f64 = 0.0;
+    for i in 0..a.len() {
+        out += (a[i] - b[i]) * (a[i] - b[i]);
+    }
+    out.sqrt()
+}

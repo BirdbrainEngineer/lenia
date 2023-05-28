@@ -2,10 +2,12 @@
 name = "lenia_simulator"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+lenia_ca = "0.1.0"
 ndarray = { version = "0.15.6", features = ["rayon"] }
 rustfft = "6.1.0"
 num-complex = "0.4.2"

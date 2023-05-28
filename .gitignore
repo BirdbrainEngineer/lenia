@@ -4,3 +4,4 @@ perf.data
 flamegraph.svg
 .gitignore
 *.png
+!demoscreenshots.png
