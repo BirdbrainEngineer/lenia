@@ -9,7 +9,7 @@ Should you still choose to use and compile this renderer then here are some impo
 
 * You should compile by running `cargo build --release`, and also run the release version with `cargo run --release`, or do both of them together with `cargo build --release && cargo run --release`
 * Depending on how "beefy" your cpu is, you may have to reduce `const X_SIDE_LEN` and `const Y_SIDE_LEN`. My system has a Ryzen 7 7700X and I could run 720p resolution at 60fps, and 1080p resolution at around 30 to 40, as long as the number of channels and kernels did not exceed the number of physical cores (8 in my case). 
-* If you wish to use this code to simulate your own Lenia systems (rather than the auto-generated ones), then the easiest way to do so, is to set `rules: Vec<Vec<f64>>` equal to `!vec[]`, and then change the kernels, growth functions, weights, etc... of the `lenia_simulator` variable. It is important that you do not press "n", "m" nor "," during the operation of the simulation in that case though, as it would crash the program :)
+* If you wish to use this code to simulate your own Lenia systems (rather than the auto-generated ones), then the easiest way to do so, is to set `rules: Vec<Vec<f64>>` equal to `Vec::new()`, and then change the kernels, growth functions, weights, etc... of the `lenia_simulator` variable. It is important that you do not press "n", "m" nor "," during the operation of the simulation in that case though, as it would crash the program :)
 
 Important key bindings (you can change them by modifying them in the `match keyboardstate.character` match block).
 * "k" - toggles between viewing the kernels or simulation
