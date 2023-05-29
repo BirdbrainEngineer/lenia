@@ -7,7 +7,6 @@ use ndarray::{ArrayD, IntoNdProducer};
 use std::{ops::Range, thread, sync::{Arc, Mutex}};
 use lenia_ca::{growth_functions, kernels, lenias::*, Channel};
 use pixel_canvas::{Canvas, Color, input};
-use probability::distribution;
 use rayon::{prelude::*, iter::empty};
 use rand::*;
 
@@ -21,6 +20,19 @@ use rand::*;
 //
 // I'm sorry that there is not better documentation for this, but this Lenia renderer was simply not the "important"
 // part of this project. If this is completely incomprehensible for you, then I suggest using lenia_ca crate directly.
+//
+// If you do decide to use this, though...
+//
+// More important key bindings
+// k - toggles between viewing the kernels or simulation
+// r - randomly seeds the simulation board based on constants earlier in the code
+// s - toggles continuous simulating
+// i - performs a single iteration of the simulation
+//
+// If using the code unchanged then the following are also important
+// n - Changes the currently used rulesets completely
+// m - Uses the currently set ruleset as basis and tweaks the ruleset slightly for a slightly different result
+// , - Permanently tweaks the rulesets slightly from the currently used ruleset
 
 const X_SIDE_LEN: usize = 1280;
 const Y_SIDE_LEN: usize = 720;
@@ -69,7 +81,7 @@ fn main() {
     let mut rules: Vec<Vec<f64>> = Vec::new();
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
-    let mut rules = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
+    let mut rules: Vec<Vec<f64>> = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
     
     let mut frames: Vec<ndarray::Array2<f64>> = Vec::new();
     for i_ in 0..3 {
@@ -88,16 +100,7 @@ fn main() {
         .input(keyboardhandler::KeyboardState::handle_input);
 
 
-    // More important key bindings
-    // k - toggles between viewing the kernels or simulation
-    // r - randomly seeds the simulation board based on constants earlier in the code
-    // s - toggles continuous simulating
-    // i - performs a single iteration of the simulation
-    //
-    // If using the code unchanged then the following are also important
-    // n - Changes the currently used rulesets completely
-    // m - Uses the currently set ruleset as basis and tweaks the ruleset slightly for a slightly different result
-    // , - Permanently tweaks the rulesets slightly from the currently used ruleset
+
     canvas.render(move |keyboardstate, image| {
 
         if simulating && continuous_capture {
