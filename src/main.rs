@@ -42,12 +42,12 @@ const Z_SIDE_LEN: usize = 50;
 const W_SIDE_LEN: usize = 50;
 const SCALE: usize = 1;
 const GAIN: f64 = 5000.0;
-const MU_RANGE: Range<f64> = 0.1..0.6;
+const MU_RANGE: Range<f64> = 0.1..0.55;
 const KERNEL_RANGE: Range<f64> = 0.01..1.0;
 const SIGMA_LOW: f64 = 0.01;
 const SIGMA_HIGH: f64 = 0.2;
 const GROWTH_LOW: f64 = 0.05;
-const GROWTH_HIGH: f64 = 0.9;
+const GROWTH_HIGH: f64 = 0.6;
 const RADIUS_RANGE: Range<f64> = 0.5..1.0;
 
 fn main() {
@@ -58,14 +58,14 @@ fn main() {
     let mut checking_transformed = false;
     let mut checking_deltas = false;
     let mut z_depth = Z_SIDE_LEN/2;
-    let kernel_radius = 60;
+    let kernel_radius = 100;
     let mut kernel_z_depth = kernel_radius / 2;
     let channel_shape = vec![X_SIDE_LEN, Y_SIDE_LEN];
     let view_axis = [0, 1];
     let fill_channels = vec![true, true, true, true, true, false, false, false];
-    let randomness_scalers = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
-    let randomness_sizes = vec![70, 70, 70, 70, 70, 50, 50, 50];
-    let randomness_patches = vec![20, 20, 20, 20, 20, 1, 1, 1, 1];
+    let randomness_scalers = vec![0.7, 0.7, 0.7, 0.7, 0.7, 1.0, 1.0, 1.0];
+    let randomness_sizes = vec![120, 120, 120, 120, 120, 50, 50, 50];
+    let randomness_patches = vec![60, 60, 60, 20, 20, 1, 1, 1, 1];
     let discrete_randomness = false;
     let view_channels: Vec<i32> = vec![1, 2, 3];
     let dt = 0.1;
@@ -73,12 +73,11 @@ fn main() {
     let skip_frames = 1;
     let capture_deltas = true;
 
-    let num_channels: usize = 3;
-    let num_convolutions: usize = 12;
+    let num_channels: usize = 5;
+    let num_convolutions: usize = 15;
     let sigma_base = 0.15;
-    let max_rings = 2.0;
+    let max_rings = 3.0;
     let maximum_adjust = 0.25;
-    let mut rules: Vec<Vec<f64>> = Vec::new();
 
     let mut lenia_simulator = lenia_ca::Simulator::<ExpandedLenia>::new(&channel_shape);
     let mut rules: Vec<Vec<f64>> = new_lenia(&mut lenia_simulator, kernel_radius, num_channels, num_convolutions, sigma_base, max_rings, dt);
